@@ -17,18 +17,18 @@ if [[ -z "$kernel_version" ]]; then
 fi
 
 case "$arch" in
-aarch64 | arm64)
-  build_arch="arm64"
-  config_arch="arm64"
-  ;;
-x86_64)
-  build_arch="x86_64"
-  config_arch="x86_64"
-  ;;
-*)
-  echo "Unsupported arch: $arch" >&2
-  exit 1
-  ;;
+  aarch64|arm64)
+    build_arch="arm64"
+    config_arch="arm64"
+    ;;
+  x86_64)
+    build_arch="x86_64"
+    config_arch="x86_64"
+    ;;
+  *)
+    echo "Unsupported arch: $arch" >&2
+    exit 1
+    ;;
 esac
 
 if ! [[ "$kernel_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -52,11 +52,11 @@ git clean -fdx
 bash "$repo_root/scripts/apply-bbrv3-port.sh"
 bash "$repo_root/scripts/apply-bbrv3-max-profile.sh"
 
-grep -v "MODULE_DESCRIPTION" net/ipv4/tcp_bbr.c >net/ipv4/tcp_bbr.c.tmp
+grep -v "MODULE_DESCRIPTION" net/ipv4/tcp_bbr.c > net/ipv4/tcp_bbr.c.tmp
 mv net/ipv4/tcp_bbr.c.tmp net/ipv4/tcp_bbr.c
-echo 'MODULE_DESCRIPTION("TCP BBR v3 Max - aggressive throughput profile by Joey");' >>net/ipv4/tcp_bbr.c
+echo 'MODULE_DESCRIPTION("TCP BBR v3 Max - aggressive throughput profile by Joey");' >> net/ipv4/tcp_bbr.c
 
-IFS='.' read -r v p s <<<"$kernel_version"
+IFS='.' read -r v p s <<< "$kernel_version"
 sed -i "s/^VERSION *=.*/VERSION = $v/" Makefile
 sed -i "s/^PATCHLEVEL *=.*/PATCHLEVEL = $p/" Makefile
 sed -i "s/^SUBLEVEL *=.*/SUBLEVEL = $s/" Makefile
