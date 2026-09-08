@@ -48,5 +48,5 @@ mkdir -p "$DIST/lib" "$DIST/lib/verify"
 cp -r lib/* "$DIST/lib/" 2>/dev/null || true
 
 echo "build done -> $DIST/"
-ls -lh "$DIST/" 2>&1 | head -n 20
-ls -lh "$DIST/lib/" 2>&1 | head -n 20
+find "$DIST/" -maxdepth 1 -type f -printf '%s %p\n' | sort -rn | head -n 20 || true
+find "$DIST/lib/" -type f -printf '%s %p\n' | sort -rn | head -n 20 || true

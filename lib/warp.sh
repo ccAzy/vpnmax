@@ -138,8 +138,10 @@ setup_logrotate() {
 ROT
     chmod 0644 /etc/logrotate.d/vpnmax 2>/dev/null || true
     # 若 logrotate 服务在则检查配置语法
-    command -v logrotate >/dev/null 2>&1 && logrotate -d /etc/logrotate.d/vpnmax >/dev/null 2>&1 &&
-        ok "日志轮转已配置 (/etc/logrotate.d/vpnmax，周轮+保留4份+压缩)" ||
+    if command -v logrotate >/dev/null 2>&1 && logrotate -d /etc/logrotate.d/vpnmax >/dev/null 2>&1; then
+        ok "日志轮转已配置 (/etc/logrotate.d/vpnmax，周轮+保留4份+压缩)"
+    else
         warn "logrotate 配置已写，但语法校验未通过或 logrotate 未安装（日志将不轮转）"
+    fi
     return 0
 }

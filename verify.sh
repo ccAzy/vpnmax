@@ -210,11 +210,15 @@ else warn "G7: argo.log 无运行域名，隧道可能未启动"; fi
 # 品牌切割回归：旧 vpnplus/ACVPN 资产应已被迁移，无残留
 _MIG_OK=true
 for _mf in /etc/systemd/system/vpnplus-net-tuning.service /etc/systemd/system/vpnplus-netfilter-restore.service /usr/local/sbin/vpnplus-argo-keepalive.sh /etc/logrotate.d/vpnplus /etc/systemd/system/sing-box.service.d/99-vpnplus.conf /etc/.vpnplus-optimized /etc/.vpnplus-singbox; do
-    if [ -e "$_mf" ]; then warn "迁移残留: $_mf 仍存在（重跑 deploy 即接管清理）"; _MIG_OK=false; fi
+    if [ -e "$_mf" ]; then
+        warn "迁移残留: $_mf 仍存在（重跑 deploy 即接管清理）"
+        _MIG_OK=false
+    fi
 done
 for _mc in ACVPN_PORTHOP ACVPN_ANTIPROBE ACVPN_RSS; do
     if iptables -L "$_mc" -n >/dev/null 2>&1 || iptables -t nat -L "$_mc" -n >/dev/null 2>&1; then
-        warn "迁移残留: 旧链 $_mc 仍存在（重跑 deploy 即拆除）"; _MIG_OK=false
+        warn "迁移残留: 旧链 $_mc 仍存在（重跑 deploy 即拆除）"
+        _MIG_OK=false
     fi
 done
 $_MIG_OK && {

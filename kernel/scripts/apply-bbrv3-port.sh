@@ -31,12 +31,12 @@ if git apply --check "$patch_file" 2>/dev/null; then
   git apply "$patch_file"
 else
   echo "Exact patch application failed; retrying with fuzzy matching." >&2
-  if ! patch -p1 --forward --fuzz=3 --dry-run < "$patch_file"; then
+  if ! patch -p1 --forward --fuzz=3 --dry-run <"$patch_file"; then
     echo "BBRv3 patch does not apply to this tree even with fuzz." >&2
     echo "Refresh patches/bbrv3-linux-$kernel_version.patch against the current linux-$kernel_version.y tree." >&2
     exit 1
   fi
-  patch -p1 --forward --fuzz=3 < "$patch_file"
+  patch -p1 --forward --fuzz=3 <"$patch_file"
   echo "WARNING: patch applied with fuzz; refresh the patch file when convenient." >&2
 fi
 

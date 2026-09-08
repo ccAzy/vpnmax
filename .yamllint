@@ -1,0 +1,5 @@
+# 移植的上游构建文件含长 shell 行，80 列不适用。
+extends: default
+rules:
+  line-length:
+    max: 150

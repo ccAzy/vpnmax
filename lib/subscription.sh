@@ -78,16 +78,19 @@ get_sub_port() {
 
 wait_subscription() {
     info "等待订阅服务启动..."
-    local SUB_PORT="" i
-    for i in $(seq 1 30); do
+    local SUB_PORT=""
+    for _ in $(seq 1 30); do
         sleep 2
         SUB_PORT=$(get_sub_port)
         [ -n "$SUB_PORT" ] && break
     done
     if [ -n "$SUB_PORT" ]; then
         ok "订阅端口: $SUB_PORT"
-        curl -fsL --max-time 5 -o /dev/null "http://127.0.0.1:$SUB_PORT/" 2>/dev/null &&
-            ok "订阅服务 HTTP 响应正常" || warn "端口 $SUB_PORT 暂未响应 HTTP"
+        if curl -fsL --max-time 5 -o /dev/null "http://127.0.0.1:$SUB_PORT/" 2>/dev/null; then
+            ok "订阅服务 HTTP 响应正常"
+        else
+            warn "端口 $SUB_PORT 暂未响应 HTTP"
+        fi
     else
         warn "订阅服务超时未启动（已等 60s）"
     fi
@@ -129,7 +132,11 @@ ensure_sub_httpd() {
             nohup busybox httpd -f -p "$port" -h /root/websbox >/dev/null 2>&1 &
             sleep 2
         fi
-        ss -tln 2>/dev/null | grep -q ":$port" && ok "订阅 HTTP 服务已启动" || warn "订阅 HTTP 服务启动失败，请手动检查"
+        if ss -tln 2>/dev/null | grep -q ":$port"; then
+            ok "订阅 HTTP 服务已启动"
+        else
+            warn "订阅 HTTP 服务启动失败，请手动检查"
+        fi
     fi
 }
 

@@ -94,12 +94,7 @@ PACKAGES=(
 
 missing=()
 for pkg in "${PACKAGES[@]}"; do
-    case "$pkg" in
-    ca-certificates | curl | jq | git | xz-utils | tmux | bash | coreutils | grep | sed | gawk | iproute2 | iptables | iptables-persistent | procps | psmisc | util-linux | cron | ethtool | kmod | logrotate)
-        # Debian 包名与命令不完全一一对应，按 dpkg 查询包是否安装
-        dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'install ok installed' || missing+=("$pkg")
-        ;;
-    esac
+    dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'install ok installed' || missing+=("$pkg")
 done
 
 if $FORCE && [ "${#missing[@]}" -eq 0 ]; then

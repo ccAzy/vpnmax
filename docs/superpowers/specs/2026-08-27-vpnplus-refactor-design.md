@@ -12,7 +12,7 @@
 
 薄入口 + `lib/` 单职责。
 
-```
+```text
 vpnmax/
 ├── bootstrap.sh            # 10行：source lib/common.sh; source lib/time.sh; 校验+调common
 ├── deploy_optimize.sh      # ~200行 编排：check_env -> install_deps -> ensure_time_sync -> bbr -> sysctl
@@ -49,7 +49,7 @@ vpnmax/
 
 ## 4. 数据流
 
-```
+```text
 bootstrap.sh -> check_env -> install_deps(BASE_PACKAGES+chrony) -> ensure_time_sync -> gai.conf
 deploy_optimize.sh -> check_env -> install_deps -> ensure_time_sync -> install_bbrv3 -> sysctl/ethtool/qdisc/limits/rss -> grub -> MARK
 deploy_singbox.sh -> check_env -> ensure_time_sync -> install_singbox_yg -> setup_subscription(KEEP_PORT/RESET_SUB) -> port_hopping -> argo -> firewall -> warp -> verify(轻量)

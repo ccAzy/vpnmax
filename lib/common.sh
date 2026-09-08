@@ -54,7 +54,10 @@ migrate_legacy_units() {
         fi
     done
     for _f in /usr/local/sbin/vpnplus-argo-keepalive.sh /usr/local/sbin/vpnplus-net-tuning.sh /var/lock/vpnplus-argo-keepalive.lock /etc/logrotate.d/vpnplus; do
-        if [ -e "$_f" ]; then run rm -rf "$_f" 2>/dev/null || true; _changed=true; fi
+        if [ -e "$_f" ]; then
+            run rm -rf "$_f" 2>/dev/null || true
+            _changed=true
+        fi
     done
     if crontab -l 2>/dev/null | grep -qE 'vpnplus-argo-keepalive|acvpn-argo-keepalive' 2>/dev/null; then
         (crontab -l 2>/dev/null | grep -vE 'vpnplus-argo-keepalive|acvpn-argo-keepalive|acvn-argo-keepalive' || true) | crontab - 2>/dev/null || true
@@ -65,10 +68,17 @@ migrate_legacy_units() {
         _changed=true
     fi
     for _pair in "/etc/.vpnplus-optimized:/etc/.vpnmax-optimized" "/etc/.vpnplus-singbox:/etc/.vpnmax-singbox"; do
-        _old="${_pair%%:*}"; _new="${_pair##*:}"
-        if [ -f "$_old" ] && [ ! -f "$_new" ]; then run touch "$_new" 2>/dev/null || true; _changed=true; fi
+        _old="${_pair%%:*}"
+        _new="${_pair##*:}"
+        if [ -f "$_old" ] && [ ! -f "$_new" ]; then
+            run touch "$_new" 2>/dev/null || true
+            _changed=true
+        fi
     done
-    if $_changed; then run systemctl daemon-reload 2>/dev/null || true; ok "旧 vpnplus 资产已迁移接管"; fi
+    if $_changed; then
+        run systemctl daemon-reload 2>/dev/null || true
+        ok "旧 vpnplus 资产已迁移接管"
+    fi
 }
 
 # 日志落盘（若 /var/log 可写）

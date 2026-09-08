@@ -72,7 +72,7 @@ EOF2
         [ "$code" = "200" ] || exit 0
         colo=$(echo "$out" | grep -oE "^colo=[A-Z0-9]+" | cut -d= -f2 | head -1)
         lat=$(echo "$out" | tail -1 | cut -d"|" -f1)
-        [ -n "$colo" ] && [ -n "$lat" ] && echo "$lat $colo $ip" >> "'"$result"'"
+        [ -n "$colo" ] && [ -n "$lat" ] && echo "$lat $colo $ip" >> "'$result'"
     ' _ {} 2>/dev/null || true
 
     if [ ! -s "$result" ]; then
