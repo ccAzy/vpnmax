@@ -56,6 +56,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_opt
 - 检查系统、架构、内存和 `/boot` 空间
 - 安装并校验 BBRv3 内核
 - 优化 TCP/UDP 和 fq
+- 智能带宽调优（自动测速 + 按区域算 buffer）
+- 亚太线路大 buffer 优化
 - 优化网卡和多队列
 - 设置系统资源限制
 - 检查 GRUB
@@ -67,6 +69,22 @@ SSH 断开是正常现象。重启后重新连接即可。
 
 ```bash
 bash deploy_optimize.sh --no-reboot
+```
+
+自定义调优模式：
+
+```bash
+# 默认：自动测速 + 按区域算 buffer
+bash deploy_optimize.sh
+
+# 亚太固定档（wmem 12MB / rmem 32MB）
+VPNMAX_BUFFER_MODE=apac bash deploy_optimize.sh
+
+# 跳过智能调优，保持原有默认值
+VPNMAX_BUFFER_MODE=default bash deploy_optimize.sh
+
+# 手动指定带宽（跳过测速）
+VPNMAX_BANDWIDTH=5000 bash deploy_optimize.sh
 ```
 
 只想检查参数和环境：
@@ -220,7 +238,7 @@ RESET_SUB=1 bash deploy_singbox.sh
 ```
 lib/common.sh      # 日志/颜色/BASE_PACKAGES+chrony
 lib/time.sh        # ensure_time_sync / check_time_sync
-lib/optimize.sh    # BBRv3 + sysctl/ethtool/qdisc（按内存分级）
+lib/optimize.sh    # BBRv3 + sysctl/ethtool/qdisc（按内存分级）+ 智能带宽/亚太调优
 lib/firewall.sh    # VPNMAX_* 链 + 跳跃 DNAT + 清理
 lib/singbox.sh     # sb_feed / sb 安装
 lib/subscription.sh# KEEP_PORT + RESET_SUB
@@ -346,6 +364,7 @@ curl -v http://127.0.0.1:订阅端口/token/clmi.yaml
 
 - **sb 零上游**：`vendor/sb.sh` 入仓，部署优先本地拷贝，缺失才回退自家 raw，全程 SHA256 校验；`SB_URL` 已指向自家仓库。
 - **BBR 内核自供**：`kernel/` 移植自家构建流水线（每日定时构建发 release），部署默认从本仓 release 拉 deb，首个构建落地前桥接回退老仓（warn 标明）。
+- **智能带宽调优**：移植自 byJoey，自动测速 + 按区域（亚太/美欧）+ 内存上限动态算 TCP buffer，`VPNMAX_BUFFER_MODE` 可控。
 - **边缘优选**：`lib/edgeprefer.sh` 在 Argo 启动前采样官方段，选最优 colo 与 v4/v6 家族，经 `argo-extra.conf` 注入隧道；`EDGE_PREFER=off` 可跳过，`ARGO_REGION=xx` 可手动 pin region。
 - **出口 prefer_ipv4 常态化**：不再仅 `--force` 才修，幂等对齐。
 - **verify 1c 回归**：SSH/旧残留/内核/cloudflared pin 版/订阅-隧道一致性。
