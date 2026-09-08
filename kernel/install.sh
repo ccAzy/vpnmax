@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # 限制脚本仅支持基于 Debian/Ubuntu 的系统
-if ! command -v apt-get &> /dev/null; then
+if ! command -v apt-get &>/dev/null; then
     echo -e "\033[31m此脚本仅支持 Debian/Ubuntu 系统，请在支持 apt-get 和 .deb 内核包的系统上运行！\033[0m"
     echo -e "\033[33mAlpine Linux 等非 Debian 系统暂不支持安装本项目内核包。\033[0m"
     exit 1
 fi
 
 # 在 root 环境且未安装 sudo 时提供兼容包装，避免命令直接失败
-if ! command -v sudo &> /dev/null; then
+if ! command -v sudo &>/dev/null; then
     if [[ "$(id -u)" -eq 0 ]]; then
         sudo() { "$@"; }
     else
@@ -20,9 +20,9 @@ fi
 # 检查并安装必要的依赖
 REQUIRED_CMDS=("curl" "wget" "dpkg" "awk" "sed" "sysctl" "jq")
 for cmd in "${REQUIRED_CMDS[@]}"; do
-    if ! command -v $cmd &> /dev/null; then
+    if ! command -v $cmd &>/dev/null; then
         echo -e "\033[33m缺少依赖：$cmd，正在安装...\033[0m"
-        sudo apt-get update && sudo apt-get install -y $cmd > /dev/null 2>&1
+        sudo apt-get update && sudo apt-get install -y $cmd >/dev/null 2>&1
     fi
 done
 
@@ -76,7 +76,7 @@ check_release_api_response() {
         return 1
     fi
 
-    if ! echo "$response" | jq -e 'type=="array"' > /dev/null 2>&1; then
+    if ! echo "$response" | jq -e 'type=="array"' >/dev/null 2>&1; then
         echo -e "\033[31mGitHub API 返回数据格式异常，无法继续。\033[0m"
         return 1
     fi
@@ -87,7 +87,7 @@ install_quick_command() {
         return 0
     fi
 
-    if sudo tee "$QUICK_COMMAND_PATH" > /dev/null <<EOF
+    if sudo tee "$QUICK_COMMAND_PATH" >/dev/null <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 export BBRV3_SKIP_QUICK_COMMAND=1
@@ -108,11 +108,11 @@ version_ge() {
 
 debian_version_from_codename() {
     case "${1:-}" in
-        bookworm) echo "12" ;;
-        trixie) echo "13" ;;
-        forky) echo "14" ;;
-        sid|unstable) echo "999" ;;
-        *) return 1 ;;
+    bookworm) echo "12" ;;
+    trixie) echo "13" ;;
+    forky) echo "14" ;;
+    sid | unstable) echo "999" ;;
+    *) return 1 ;;
     esac
 }
 
@@ -139,22 +139,22 @@ assert_supported_kernel_install_system() {
     os_name="${PRETTY_NAME:-${NAME:-未知系统}}"
 
     case "$os_id" in
-        ubuntu)
-            min_version="24.04"
-            distro_name="Ubuntu"
-            ;;
-        debian)
-            min_version="12"
-            distro_name="Debian"
-            if [[ -z "$os_version" ]]; then
-                os_version="$(debian_version_from_codename "$os_codename" || true)"
-            fi
-            ;;
-        *)
-            echo -e "\033[31m当前系统为 $os_name，不在 7.x 主线内核安装白名单内。\033[0m"
-            echo -e "\033[33m最低支持：Ubuntu 24.04+ / Debian 12+；推荐系统：Ubuntu 24.04+ / Debian 12。旧系统/衍生系统可能因用户态、initramfs 或引导链路过旧导致 kernel panic。\033[0m"
-            return 1
-            ;;
+    ubuntu)
+        min_version="24.04"
+        distro_name="Ubuntu"
+        ;;
+    debian)
+        min_version="12"
+        distro_name="Debian"
+        if [[ -z "$os_version" ]]; then
+            os_version="$(debian_version_from_codename "$os_codename" || true)"
+        fi
+        ;;
+    *)
+        echo -e "\033[31m当前系统为 $os_name，不在 7.x 主线内核安装白名单内。\033[0m"
+        echo -e "\033[33m最低支持：Ubuntu 24.04+ / Debian 12+；推荐系统：Ubuntu 24.04+ / Debian 12。旧系统/衍生系统可能因用户态、initramfs 或引导链路过旧导致 kernel panic。\033[0m"
+        return 1
+        ;;
     esac
 
     if [[ -z "$os_version" ]] || ! version_ge "$os_version" "$min_version"; then
@@ -203,10 +203,10 @@ clean_apac_tuning_conf() {
 apply_apac_tuning() {
     echo -e "\033[36m正在应用亚太机器 TCP 调优...\033[0m"
 
-    if sudo sysctl -w net.ipv4.tcp_wmem="4096 16384 12582912" > /dev/null \
-        && sudo sysctl -w net.ipv4.tcp_rmem="4096 131072 33554432" > /dev/null \
-        && sudo sysctl -w net.ipv4.tcp_limit_output_bytes="4194304" > /dev/null \
-        && sudo sysctl -w net.ipv4.tcp_slow_start_after_idle="0" > /dev/null; then
+    if sudo sysctl -w net.ipv4.tcp_wmem="4096 16384 12582912" >/dev/null &&
+        sudo sysctl -w net.ipv4.tcp_rmem="4096 131072 33554432" >/dev/null &&
+        sudo sysctl -w net.ipv4.tcp_limit_output_bytes="4194304" >/dev/null &&
+        sudo sysctl -w net.ipv4.tcp_slow_start_after_idle="0" >/dev/null; then
         echo -e "\033[1;32m✔ 亚太机器 TCP 调优已立即生效\033[0m"
     else
         echo -e "\033[31m✘ 亚太机器 TCP 调优应用失败，请检查当前内核是否支持这些 sysctl 项。\033[0m"
@@ -219,7 +219,7 @@ apply_apac_tuning() {
         echo "net.ipv4.tcp_rmem = 4096 131072 33554432"
         echo "net.ipv4.tcp_limit_output_bytes = 4194304"
         echo "net.ipv4.tcp_slow_start_after_idle = 0"
-    } | sudo tee -a "$SYSCTL_CONF" > /dev/null
+    } | sudo tee -a "$SYSCTL_CONF" >/dev/null
 
     echo -e "\033[1;32m✔ 亚太机器 TCP 调优已永久写入：$SYSCTL_CONF\033[0m"
     echo -e "\033[36m  tcp_wmem:                 \033[1;32m$(sysctl -n net.ipv4.tcp_wmem)\033[0m"
@@ -240,9 +240,9 @@ get_tcp_buffer_cap_mb() {
 
     if ! [[ "$mem_kb" =~ ^[0-9]+$ ]]; then
         echo 64
-    elif (( mem_kb < 524288 )); then
+    elif ((mem_kb < 524288)); then
         echo 16
-    elif (( mem_kb < 1048576 )); then
+    elif ((mem_kb < 1048576)); then
         echo 32
     else
         echo 64
@@ -257,35 +257,35 @@ calculate_smart_buffer_mb() {
     local buffer_mb=16
 
     bandwidth="${bandwidth%.*}"
-    if ! [[ "$bandwidth" =~ ^[0-9]+$ ]] || (( bandwidth <= 0 )); then
+    if ! [[ "$bandwidth" =~ ^[0-9]+$ ]] || ((bandwidth <= 0)); then
         bandwidth=1000
     fi
 
     if [[ "$region" == "overseas" ]]; then
-        if (( bandwidth < 500 )); then
+        if ((bandwidth < 500)); then
             buffer_mb=16
-        elif (( bandwidth < 1000 )); then
+        elif ((bandwidth < 1000)); then
             buffer_mb=48
         else
             buffer_mb=64
         fi
     else
-        if (( bandwidth < 500 )); then
+        if ((bandwidth < 500)); then
             buffer_mb=8
-        elif (( bandwidth < 1000 )); then
+        elif ((bandwidth < 1000)); then
             buffer_mb=12
-        elif (( bandwidth < 2000 )); then
+        elif ((bandwidth < 2000)); then
             buffer_mb=16
-        elif (( bandwidth < 5000 )); then
+        elif ((bandwidth < 5000)); then
             buffer_mb=24
-        elif (( bandwidth < 10000 )); then
+        elif ((bandwidth < 10000)); then
             buffer_mb=28
         else
             buffer_mb=32
         fi
     fi
 
-    if (( buffer_mb > cap_mb )); then
+    if ((buffer_mb > cap_mb)); then
         buffer_mb="$cap_mb"
     fi
     echo "$buffer_mb"
@@ -296,16 +296,16 @@ get_ookla_speedtest_download_url() {
     local cpu_arch
     cpu_arch=$(uname -m)
     case "$cpu_arch" in
-        x86_64)
-            echo "https://install.speedtest.net/app/cli/ookla-speedtest-${OOKLA_SPEEDTEST_VERSION}-linux-x86_64.tgz"
-            ;;
-        aarch64)
-            echo "https://install.speedtest.net/app/cli/ookla-speedtest-${OOKLA_SPEEDTEST_VERSION}-linux-aarch64.tgz"
-            ;;
-        *)
-            echo -e "\033[33m⚠ 当前架构 $cpu_arch 暂无内置 Ookla speedtest 下载地址。\033[0m" >&2
-            return 1
-            ;;
+    x86_64)
+        echo "https://install.speedtest.net/app/cli/ookla-speedtest-${OOKLA_SPEEDTEST_VERSION}-linux-x86_64.tgz"
+        ;;
+    aarch64)
+        echo "https://install.speedtest.net/app/cli/ookla-speedtest-${OOKLA_SPEEDTEST_VERSION}-linux-aarch64.tgz"
+        ;;
+    *)
+        echo -e "\033[33m⚠ 当前架构 $cpu_arch 暂无内置 Ookla speedtest 下载地址。\033[0m" >&2
+        return 1
+        ;;
     esac
 }
 
@@ -326,7 +326,7 @@ remove_speedtest_cli() {
         version_output=$($speedtest_path --version 2>&1 || true)
         if echo "$version_output" | grep -qi "speedtest-cli\|python" || dpkg -S "$speedtest_path" 2>/dev/null | grep -q '^speedtest-cli:'; then
             echo -e "\033[33m检测到非 Ookla 官方 speedtest，正在移除 speedtest-cli...\033[0m"
-            sudo apt-get remove --purge -y speedtest-cli > /dev/null 2>&1 || true
+            sudo apt-get remove --purge -y speedtest-cli >/dev/null 2>&1 || true
         fi
 
         if [[ "$speedtest_path" != "/usr/local/bin/speedtest" ]]; then
@@ -336,7 +336,7 @@ remove_speedtest_cli() {
 
     if dpkg -l speedtest-cli 2>/dev/null | awk 'NR>5 && $1 ~ /^ii/ {found=1} END {exit !found}'; then
         echo -e "\033[33m检测到 speedtest-cli 软件包，正在移除...\033[0m"
-        sudo apt-get remove --purge -y speedtest-cli > /dev/null 2>&1 || true
+        sudo apt-get remove --purge -y speedtest-cli >/dev/null 2>&1 || true
     fi
 
     hash -r 2>/dev/null || true
@@ -372,14 +372,14 @@ install_ookla_speedtest() {
 ensure_ookla_speedtest() {
     remove_speedtest_cli
 
-    if command -v speedtest > /dev/null 2>&1; then
+    if command -v speedtest >/dev/null 2>&1; then
         SPEEDTEST_BIN=$(command -v speedtest)
         if is_ookla_speedtest "$SPEEDTEST_BIN"; then
             return 0
         fi
     fi
 
-    if command -v speedtest > /dev/null 2>&1; then
+    if command -v speedtest >/dev/null 2>&1; then
         SPEEDTEST_BIN=$(command -v speedtest)
         if is_ookla_speedtest "$SPEEDTEST_BIN"; then
             return 0
@@ -402,7 +402,7 @@ run_speedtest_once() {
 
     for server_id in $servers_list; do
         attempt=$((attempt + 1))
-        if (( attempt > 5 )); then
+        if ((attempt > 5)); then
             break
         fi
 
@@ -501,46 +501,46 @@ select_tuning_rtt() {
         read -r choice
 
         case "$choice" in
-            1)
-                SMART_REGION="亚太"
-                SMART_REGION_CODE="asia"
-                SMART_RTT_MS=$(read_required_positive_value "\033[36m请输入真实链接延迟(ms，v2rayN 测出来的即可): \033[0m")
-                return 0
-                ;;
-            2)
-                SMART_REGION="美欧"
-                SMART_REGION_CODE="overseas"
-                SMART_RTT_MS=$(read_required_positive_value "\033[36m请输入真实链接延迟(ms，v2rayN 测出来的即可): \033[0m")
-                return 0
-                ;;
-            3)
-                SMART_RTT_MS=$(read_required_positive_value "\033[36m请输入真实链接延迟(ms，v2rayN 测出来的即可): \033[0m")
-                while true; do
-                    echo -e "\033[36m请选择 buffer 档位模式：\033[0m"
-                    echo -e "\033[33m 1. 亚太档位\033[0m"
-                    echo -e "\033[33m 2. 美欧档位\033[0m"
-                    echo -n -e "\033[36m请选择 (1-2): \033[0m"
-                    read -r buffer_choice
-                    case "$buffer_choice" in
-                        1)
-                            SMART_REGION="手动 RTT / 亚太档"
-                            SMART_REGION_CODE="asia"
-                            return 0
-                            ;;
-                        2)
-                            SMART_REGION="手动 RTT / 美欧档"
-                            SMART_REGION_CODE="overseas"
-                            return 0
-                            ;;
-                        *)
-                            echo -e "\033[31m请输入 1 或 2 选择 buffer 档位。\033[0m"
-                            ;;
-                    esac
-                done
-                ;;
-            *)
-                echo -e "\033[31m请输入 1、2 或 3 选择线路模式。\033[0m"
-                ;;
+        1)
+            SMART_REGION="亚太"
+            SMART_REGION_CODE="asia"
+            SMART_RTT_MS=$(read_required_positive_value "\033[36m请输入真实链接延迟(ms，v2rayN 测出来的即可): \033[0m")
+            return 0
+            ;;
+        2)
+            SMART_REGION="美欧"
+            SMART_REGION_CODE="overseas"
+            SMART_RTT_MS=$(read_required_positive_value "\033[36m请输入真实链接延迟(ms，v2rayN 测出来的即可): \033[0m")
+            return 0
+            ;;
+        3)
+            SMART_RTT_MS=$(read_required_positive_value "\033[36m请输入真实链接延迟(ms，v2rayN 测出来的即可): \033[0m")
+            while true; do
+                echo -e "\033[36m请选择 buffer 档位模式：\033[0m"
+                echo -e "\033[33m 1. 亚太档位\033[0m"
+                echo -e "\033[33m 2. 美欧档位\033[0m"
+                echo -n -e "\033[36m请选择 (1-2): \033[0m"
+                read -r buffer_choice
+                case "$buffer_choice" in
+                1)
+                    SMART_REGION="手动 RTT / 亚太档"
+                    SMART_REGION_CODE="asia"
+                    return 0
+                    ;;
+                2)
+                    SMART_REGION="手动 RTT / 美欧档"
+                    SMART_REGION_CODE="overseas"
+                    return 0
+                    ;;
+                *)
+                    echo -e "\033[31m请输入 1 或 2 选择 buffer 档位。\033[0m"
+                    ;;
+                esac
+            done
+            ;;
+        *)
+            echo -e "\033[31m请输入 1、2 或 3 选择线路模式。\033[0m"
+            ;;
         esac
     done
 }
@@ -559,8 +559,8 @@ apply_smart_bandwidth_tuning() {
     echo -e "\033[36m正在准备 BBR v3 智能带宽优化...\033[0m"
     load_qdisc_module "$smart_qdisc"
 
-    if sudo sysctl -w net.core.default_qdisc="$smart_qdisc" > /dev/null \
-        && sudo sysctl -w net.ipv4.tcp_congestion_control="$smart_algo" > /dev/null; then
+    if sudo sysctl -w net.core.default_qdisc="$smart_qdisc" >/dev/null &&
+        sudo sysctl -w net.ipv4.tcp_congestion_control="$smart_algo" >/dev/null; then
         echo -e "\033[1;32m✔ 已启用 BBR + FQ\033[0m"
     else
         echo -e "\033[31m✘ BBR + FQ 启用失败，请确认当前内核支持 BBR 和 fq。\033[0m"
@@ -575,10 +575,10 @@ apply_smart_bandwidth_tuning() {
         download_mbps="$upload_mbps"
     fi
 
-    if ! [[ "$upload_mbps" =~ ^[0-9]+$ ]] || (( upload_mbps <= 0 )); then
+    if ! [[ "$upload_mbps" =~ ^[0-9]+$ ]] || ((upload_mbps <= 0)); then
         upload_mbps="1000"
     fi
-    if ! [[ "$download_mbps" =~ ^[0-9]+$ ]] || (( download_mbps <= 0 )); then
+    if ! [[ "$download_mbps" =~ ^[0-9]+$ ]] || ((download_mbps <= 0)); then
         download_mbps="$upload_mbps"
     fi
 
@@ -588,12 +588,12 @@ apply_smart_bandwidth_tuning() {
     buffer_mb=$(calculate_smart_buffer_mb "$upload_mbps" "$SMART_REGION_CODE" "$cap_mb")
     buffer_bytes=$((buffer_mb * 1024 * 1024))
 
-    if sudo sysctl -w net.core.rmem_max="$buffer_bytes" > /dev/null \
-        && sudo sysctl -w net.core.wmem_max="$buffer_bytes" > /dev/null \
-        && sudo sysctl -w net.ipv4.tcp_wmem="4096 65536 $buffer_bytes" > /dev/null \
-        && sudo sysctl -w net.ipv4.tcp_rmem="4096 87380 $buffer_bytes" > /dev/null \
-        && sudo sysctl -w net.ipv4.tcp_limit_output_bytes="$output_bytes" > /dev/null \
-        && sudo sysctl -w net.ipv4.tcp_slow_start_after_idle="0" > /dev/null; then
+    if sudo sysctl -w net.core.rmem_max="$buffer_bytes" >/dev/null &&
+        sudo sysctl -w net.core.wmem_max="$buffer_bytes" >/dev/null &&
+        sudo sysctl -w net.ipv4.tcp_wmem="4096 65536 $buffer_bytes" >/dev/null &&
+        sudo sysctl -w net.ipv4.tcp_rmem="4096 87380 $buffer_bytes" >/dev/null &&
+        sudo sysctl -w net.ipv4.tcp_limit_output_bytes="$output_bytes" >/dev/null &&
+        sudo sysctl -w net.ipv4.tcp_slow_start_after_idle="0" >/dev/null; then
         echo -e "\033[1;32m✔ BBR v3 智能带宽优化已立即生效\033[0m"
     else
         echo -e "\033[31m✘ BBR v3 智能带宽优化应用失败，请检查当前内核是否支持这些 sysctl 项。\033[0m"
@@ -611,7 +611,7 @@ apply_smart_bandwidth_tuning() {
         echo "net.ipv4.tcp_rmem = 4096 87380 $buffer_bytes"
         echo "net.ipv4.tcp_limit_output_bytes = $output_bytes"
         echo "net.ipv4.tcp_slow_start_after_idle = 0"
-    } | sudo tee -a "$SYSCTL_CONF" > /dev/null
+    } | sudo tee -a "$SYSCTL_CONF" >/dev/null
 
     echo -e "\033[1;32m✔ 智能优化配置已永久写入：$SYSCTL_CONF\033[0m"
     echo -e "\033[36m  线路模式：               \033[1;32m$SMART_REGION\033[0m"
@@ -643,8 +643,8 @@ apply_extreme_speedtest_tuning() {
 
     load_qdisc_module "$extreme_qdisc"
 
-    if sudo sysctl -w net.core.default_qdisc="$extreme_qdisc" > /dev/null \
-        && sudo sysctl -w net.ipv4.tcp_congestion_control="$extreme_algo" > /dev/null; then
+    if sudo sysctl -w net.core.default_qdisc="$extreme_qdisc" >/dev/null &&
+        sudo sysctl -w net.ipv4.tcp_congestion_control="$extreme_algo" >/dev/null; then
         echo -e "\033[1;32m✔ 已启用 BBR + FQ\033[0m"
     else
         echo -e "\033[31m✘ BBR + FQ 启用失败，请确认当前内核支持 BBR 和 fq。\033[0m"
@@ -664,29 +664,29 @@ apply_extreme_speedtest_tuning() {
         done < <(get_default_route_interfaces)
     fi
 
-    if sudo sysctl -w net.core.rmem_max="$buffer_bytes" > /dev/null \
-        && sudo sysctl -w net.core.wmem_max="$buffer_bytes" > /dev/null \
-        && sudo sysctl -w net.ipv4.tcp_wmem="4096 1048576 $buffer_bytes" > /dev/null \
-        && sudo sysctl -w net.ipv4.tcp_rmem="4096 1048576 $buffer_bytes" > /dev/null \
-        && sudo sysctl -w net.ipv4.tcp_limit_output_bytes="$output_bytes" > /dev/null \
-        && sudo sysctl -w net.ipv4.tcp_slow_start_after_idle="0" > /dev/null; then
+    if sudo sysctl -w net.core.rmem_max="$buffer_bytes" >/dev/null &&
+        sudo sysctl -w net.core.wmem_max="$buffer_bytes" >/dev/null &&
+        sudo sysctl -w net.ipv4.tcp_wmem="4096 1048576 $buffer_bytes" >/dev/null &&
+        sudo sysctl -w net.ipv4.tcp_rmem="4096 1048576 $buffer_bytes" >/dev/null &&
+        sudo sysctl -w net.ipv4.tcp_limit_output_bytes="$output_bytes" >/dev/null &&
+        sudo sysctl -w net.ipv4.tcp_slow_start_after_idle="0" >/dev/null; then
         echo -e "\033[1;32m✔ 核心极限测速参数已立即生效\033[0m"
     else
         echo -e "\033[31m✘ 疯批模式核心参数应用失败，请检查当前内核是否支持这些 sysctl 项。\033[0m"
         return 1
     fi
 
-    sudo sysctl -w net.core.netdev_max_backlog="$backlog" > /dev/null 2>&1 || true
-    sudo sysctl -w net.core.optmem_max="$buffer_bytes" > /dev/null 2>&1 || true
-    sudo sysctl -w net.core.somaxconn="65535" > /dev/null 2>&1 || true
-    sudo sysctl -w net.ipv4.tcp_notsent_lowat="4294967295" > /dev/null 2>&1 || true
-    sudo sysctl -w net.ipv4.tcp_autocorking="0" > /dev/null 2>&1 || true
-    sudo sysctl -w net.ipv4.tcp_no_metrics_save="1" > /dev/null 2>&1 || true
-    sudo sysctl -w net.ipv4.tcp_mtu_probing="1" > /dev/null 2>&1 || true
-    sudo sysctl -w net.ipv4.tcp_fastopen="3" > /dev/null 2>&1 || true
-    sudo sysctl -w net.ipv4.tcp_window_scaling="1" > /dev/null 2>&1 || true
-    sudo sysctl -w net.ipv4.tcp_moderate_rcvbuf="1" > /dev/null 2>&1 || true
-    sudo sysctl -w net.ipv4.tcp_ecn="0" > /dev/null 2>&1 || true
+    sudo sysctl -w net.core.netdev_max_backlog="$backlog" >/dev/null 2>&1 || true
+    sudo sysctl -w net.core.optmem_max="$buffer_bytes" >/dev/null 2>&1 || true
+    sudo sysctl -w net.core.somaxconn="65535" >/dev/null 2>&1 || true
+    sudo sysctl -w net.ipv4.tcp_notsent_lowat="4294967295" >/dev/null 2>&1 || true
+    sudo sysctl -w net.ipv4.tcp_autocorking="0" >/dev/null 2>&1 || true
+    sudo sysctl -w net.ipv4.tcp_no_metrics_save="1" >/dev/null 2>&1 || true
+    sudo sysctl -w net.ipv4.tcp_mtu_probing="1" >/dev/null 2>&1 || true
+    sudo sysctl -w net.ipv4.tcp_fastopen="3" >/dev/null 2>&1 || true
+    sudo sysctl -w net.ipv4.tcp_window_scaling="1" >/dev/null 2>&1 || true
+    sudo sysctl -w net.ipv4.tcp_moderate_rcvbuf="1" >/dev/null 2>&1 || true
+    sudo sysctl -w net.ipv4.tcp_ecn="0" >/dev/null 2>&1 || true
 
     clean_sysctl_conf
     clean_smart_tuning_conf
@@ -710,7 +710,7 @@ apply_extreme_speedtest_tuning() {
         echo "net.ipv4.tcp_window_scaling = 1"
         echo "net.ipv4.tcp_moderate_rcvbuf = 1"
         echo "net.ipv4.tcp_ecn = 0"
-    } | sudo tee -a "$SYSCTL_CONF" > /dev/null
+    } | sudo tee -a "$SYSCTL_CONF" >/dev/null
 
     echo -e "\033[1;32m✔ 疯批模式配置已永久写入：$SYSCTL_CONF\033[0m"
     echo -e "\033[36m  队列算法：               \033[1;32m$(sysctl -n net.core.default_qdisc)\033[0m"
@@ -727,7 +727,7 @@ clear_network_optimizations() {
     clean_sysctl_conf
     clean_smart_tuning_conf
     sudo rm -f "$MODULES_CONF"
-    sudo sysctl --system > /dev/null 2>&1 || true
+    sudo sysctl --system >/dev/null 2>&1 || true
 
     echo -e "\033[1;32m✔ 已清空网络优化持久配置\033[0m"
     echo -e "\033[36m  已清理：$SYSCTL_CONF 中的 BBR/qdisc/TCP buffer 参数\033[0m"
@@ -748,10 +748,10 @@ load_qdisc_module() {
         sudo modprobe "$module_name" 2>/dev/null || true
     fi
 
-    if sudo sysctl -w net.core.default_qdisc="$qdisc_name" > /dev/null 2>&1; then
+    if sudo sysctl -w net.core.default_qdisc="$qdisc_name" >/dev/null 2>&1; then
         applied_qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null || true)
         if [[ -n "$previous_qdisc" ]]; then
-            sudo sysctl -w net.core.default_qdisc="$previous_qdisc" > /dev/null 2>&1 || true
+            sudo sysctl -w net.core.default_qdisc="$previous_qdisc" >/dev/null 2>&1 || true
         fi
         if [[ "$applied_qdisc" == "$qdisc_name" ]]; then
             return 0
@@ -760,10 +760,10 @@ load_qdisc_module() {
 
     echo -e "\033[36m正在加载内核模块 $module_name...\033[0m"
     if sudo modprobe "$module_name" 2>/dev/null; then
-        if sudo sysctl -w net.core.default_qdisc="$qdisc_name" > /dev/null 2>&1; then
+        if sudo sysctl -w net.core.default_qdisc="$qdisc_name" >/dev/null 2>&1; then
             applied_qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null || true)
             if [[ -n "$previous_qdisc" ]]; then
-                sudo sysctl -w net.core.default_qdisc="$previous_qdisc" > /dev/null 2>&1 || true
+                sudo sysctl -w net.core.default_qdisc="$previous_qdisc" >/dev/null 2>&1 || true
             fi
             if [[ "$applied_qdisc" == "$qdisc_name" ]]; then
                 echo -e "\033[1;32m✔ 队列算法 $qdisc_name 可用\033[0m"
@@ -778,13 +778,13 @@ load_qdisc_module() {
 
 # 函数：确保可以操作当前网卡队列
 ensure_iproute2_tools() {
-    if command -v ip > /dev/null 2>&1 && command -v tc > /dev/null 2>&1; then
+    if command -v ip >/dev/null 2>&1 && command -v tc >/dev/null 2>&1; then
         return 0
     fi
 
     echo -e "\033[36m正在安装 iproute2，用于立即切换当前网卡队列算法...\033[0m"
-    sudo apt-get update > /dev/null 2>&1 || true
-    if sudo apt-get install -y iproute2 > /dev/null 2>&1; then
+    sudo apt-get update >/dev/null 2>&1 || true
+    if sudo apt-get install -y iproute2 >/dev/null 2>&1; then
         return 0
     fi
 
@@ -850,8 +850,8 @@ persist_qdisc_module() {
         return 0
     fi
 
-    if modinfo "$module_name" > /dev/null 2>&1 || lsmod | grep -q "^${module_name//-/_}"; then
-        echo "$module_name" | sudo tee "$MODULES_CONF" > /dev/null
+    if modinfo "$module_name" >/dev/null 2>&1 || lsmod | grep -q "^${module_name//-/_}"; then
+        echo "$module_name" | sudo tee "$MODULES_CONF" >/dev/null
         echo -e "\033[1;32m(☆^ー^☆) 更改已永久保存，模块 $module_name 将在开机时自动加载~\033[0m"
     else
         sudo rm -f "$MODULES_CONF"
@@ -864,7 +864,7 @@ ensure_security_rule() {
     local rule="$1"
     local changed_var="$2"
     if ! grep -Fqx "$rule" "$SECURITY_MODPROBE_CONF" 2>/dev/null; then
-        echo "$rule" | sudo tee -a "$SECURITY_MODPROBE_CONF" > /dev/null
+        echo "$rule" | sudo tee -a "$SECURITY_MODPROBE_CONF" >/dev/null
         eval "$changed_var=1"
     fi
 }
@@ -895,7 +895,7 @@ apply_security_mitigations() {
 
     sudo touch "$SECURITY_MODPROBE_CONF"
     if ! grep -Fqx "# Managed by Actions-bbr-v3" "$SECURITY_MODPROBE_CONF" 2>/dev/null; then
-        echo "# Managed by Actions-bbr-v3" | sudo tee -a "$SECURITY_MODPROBE_CONF" > /dev/null
+        echo "# Managed by Actions-bbr-v3" | sudo tee -a "$SECURITY_MODPROBE_CONF" >/dev/null
         changed=1
     fi
 
@@ -939,17 +939,17 @@ apply_security_mitigations() {
 ask_to_save() {
     # 首先尝试加载队列调度模块
     load_qdisc_module "$QDISC"
-    
+
     # 立即应用设置
     echo -e "\033[36m正在应用配置...\033[0m"
-    sudo sysctl -w net.core.default_qdisc="$QDISC" > /dev/null 2>&1
-    sudo sysctl -w net.ipv4.tcp_congestion_control="$ALGO" > /dev/null 2>&1
+    sudo sysctl -w net.core.default_qdisc="$QDISC" >/dev/null 2>&1
+    sudo sysctl -w net.ipv4.tcp_congestion_control="$ALGO" >/dev/null 2>&1
     apply_qdisc_to_active_interfaces "$QDISC" || return 1
-    
+
     # 验证是否生效
     NEW_QDISC=$(sysctl -n net.core.default_qdisc 2>/dev/null)
     NEW_ALGO=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
-    
+
     if [[ "$NEW_QDISC" == "$QDISC" && "$NEW_ALGO" == "$ALGO" ]]; then
         echo -e "\033[1;32m✔ 配置已立即生效！\033[0m"
         echo -e "\033[36m  当前队列算法：\033[1;32m$NEW_QDISC\033[0m"
@@ -961,14 +961,14 @@ ask_to_save() {
         echo -e "\033[33m  可能原因：当前内核不支持 $QDISC 队列算法\033[0m"
         return 1
     fi
-    
+
     echo -n -e "\033[36m(｡♥‿♥｡) 要将这些配置永久保存到 $SYSCTL_CONF 吗？(y/n): \033[0m"
     read -r SAVE
     if [[ "$SAVE" == "y" || "$SAVE" == "Y" ]]; then
         clean_sysctl_conf
-        echo "net.core.default_qdisc=$QDISC" | sudo tee -a "$SYSCTL_CONF" > /dev/null
-        echo "net.ipv4.tcp_congestion_control=$ALGO" | sudo tee -a "$SYSCTL_CONF" > /dev/null
-        sudo sysctl --system > /dev/null 2>&1
+        echo "net.core.default_qdisc=$QDISC" | sudo tee -a "$SYSCTL_CONF" >/dev/null
+        echo "net.ipv4.tcp_congestion_control=$ALGO" | sudo tee -a "$SYSCTL_CONF" >/dev/null
+        sudo sysctl --system >/dev/null 2>&1
 
         persist_qdisc_module "$QDISC"
     else
@@ -983,15 +983,15 @@ get_installed_version() {
 
     versions=$(dpkg -l 2>/dev/null | awk '/^ii/ && $2 ~ /^linux-image-/ && $2 ~ /joeyblog/ {sub(/^linux-image-/, "", $2); print $2}')
     case "$profile" in
-        standard)
-            echo "$versions" | grep -E -- '-joeyblog-bbrv3$' | sort -V | tail -n 1
-            ;;
-        max)
-            echo "$versions" | grep -E -- '-joeyblog-bbrv3-max$' | sort -V | tail -n 1
-            ;;
-        *)
-            echo "$versions" | sort -V | tail -n 1
-            ;;
+    standard)
+        echo "$versions" | grep -E -- '-joeyblog-bbrv3$' | sort -V | tail -n 1
+        ;;
+    max)
+        echo "$versions" | grep -E -- '-joeyblog-bbrv3-max$' | sort -V | tail -n 1
+        ;;
+    *)
+        echo "$versions" | sort -V | tail -n 1
+        ;;
     esac
 }
 
@@ -1005,8 +1005,8 @@ get_arch_filter() {
 
 get_profile_label() {
     case "${1:-standard}" in
-        max) echo "BBR v3 Max（激进吞吐内核）" ;;
-        *) echo "BBR v3 标准版" ;;
+    max) echo "BBR v3 Max（激进吞吐内核）" ;;
+    *) echo "BBR v3 标准版" ;;
     esac
 }
 
@@ -1036,24 +1036,24 @@ select_kernel_profile() {
     read -r PROFILE_CHOICE
 
     case "${PROFILE_CHOICE:-1}" in
-        1)
-            KERNEL_PROFILE="standard"
-            ;;
-        2)
-            KERNEL_PROFILE="max"
-            echo -e "\033[31m警告：BBR v3 Max 会提高探测和窗口策略的进攻性，但仍保留 loss/ECN/inflight 反馈闭环；只适合自有链路吞吐测试，不建议日常生产使用。\033[0m"
-            ;;
-        *)
-            echo -e "\033[31m输入无效，取消安装。\033[0m"
-            return 1
-            ;;
+    1)
+        KERNEL_PROFILE="standard"
+        ;;
+    2)
+        KERNEL_PROFILE="max"
+        echo -e "\033[31m警告：BBR v3 Max 会提高探测和窗口策略的进攻性，但仍保留 loss/ECN/inflight 反馈闭环；只适合自有链路吞吐测试，不建议日常生产使用。\033[0m"
+        ;;
+    *)
+        echo -e "\033[31m输入无效，取消安装。\033[0m"
+        return 1
+        ;;
     esac
 }
 
 # 函数：智能更新引导加载程序
 update_bootloader() {
     echo -e "\033[36m正在更新引导加载程序...\033[0m"
-    if command -v update-grub &> /dev/null; then
+    if command -v update-grub &>/dev/null; then
         echo -e "\033[33m检测到 GRUB，正在执行 update-grub...\033[0m"
         if sudo update-grub; then
             echo -e "\033[1;32mGRUB 更新成功！\033[0m"
@@ -1072,23 +1072,23 @@ update_bootloader() {
 
 # 函数：安全地安装下载的包
 install_packages() {
-    if ! ls /tmp/linux-*.deb &> /dev/null; then
+    if ! ls /tmp/linux-*.deb &>/dev/null; then
         echo -e "\033[31m错误：未在 /tmp 目录下找到内核文件，安装中止。\033[0m"
         return 1
     fi
 
     for deb_file in /tmp/linux-*.deb; do
-        if ! dpkg-deb -I "$deb_file" > /dev/null 2>&1; then
+        if ! dpkg-deb -I "$deb_file" >/dev/null 2>&1; then
             echo -e "\033[31m当前系统无法读取安装包：$deb_file\033[0m"
             echo -e "\033[33m可能原因：dpkg 版本过旧，不支持该压缩格式。建议升级 dpkg 后重试。\033[0m"
             return 1
         fi
     done
-    
+
     echo -e "\033[36m开始卸载旧版内核... \033[0m"
     INSTALLED_PACKAGES=$(dpkg -l | grep "joeyblog" | awk '{print $2}' | tr '\n' ' ')
     if [[ -n "$INSTALLED_PACKAGES" ]]; then
-        sudo apt-get remove --purge $INSTALLED_PACKAGES -y > /dev/null 2>&1
+        sudo apt-get remove --purge $INSTALLED_PACKAGES -y >/dev/null 2>&1
     fi
 
     echo -e "\033[36m开始安装新内核... \033[0m"
@@ -1158,14 +1158,17 @@ install_latest_version() {
       .[] | select(.tag_name == $tag) | .assets[].browser_download_url
       | select(test("(-dbg_|-dbgsym_)"; "i") | not)
     ')
-    
+
     rm -f /tmp/linux-*.deb
 
     for URL in $ASSET_URLS; do
         echo -e "\033[36m正在下载文件：$URL\033[0m"
-        wget -q --show-progress "$URL" -P /tmp/ || { echo -e "\033[31m下载失败：$URL\033[0m"; return 1; }
+        wget -q --show-progress "$URL" -P /tmp/ || {
+            echo -e "\033[31m下载失败：$URL\033[0m"
+            return 1
+        }
     done
-    
+
     install_packages
 }
 
@@ -1203,18 +1206,18 @@ install_specific_version() {
     IFS=$'\n' read -rd '' -a TAG_ARRAY <<<"$MATCH_TAGS"
 
     for i in "${!TAG_ARRAY[@]}"; do
-        echo -e "\033[33m $((i+1)). ${TAG_ARRAY[$i]}\033[0m"
+        echo -e "\033[33m $((i + 1)). ${TAG_ARRAY[$i]}\033[0m"
     done
 
     echo -n -e "\033[36m请输入要安装的版本编号（例如 1）：\033[0m"
     read -r CHOICE
-    
-    if ! [[ "$CHOICE" =~ ^[0-9]+$ ]] || (( CHOICE < 1 || CHOICE > ${#TAG_ARRAY[@]} )); then
+
+    if ! [[ "$CHOICE" =~ ^[0-9]+$ ]] || ((CHOICE < 1 || CHOICE > ${#TAG_ARRAY[@]})); then
         echo -e "\033[31m输入无效编号，取消操作。\033[0m"
         return 1
     fi
-    
-    INDEX=$((CHOICE-1))
+
+    INDEX=$((CHOICE - 1))
     SELECTED_TAG="${TAG_ARRAY[$INDEX]}"
     echo -e "\033[36m已选择版本：\033[0m\033[1;32m$SELECTED_TAG\033[0m"
 
@@ -1222,12 +1225,15 @@ install_specific_version() {
       .[] | select(.tag_name == $tag) | .assets[].browser_download_url
       | select(test("(-dbg_|-dbgsym_)"; "i") | not)
     ')
-    
+
     rm -f /tmp/linux-*.deb
-    
+
     for URL in $ASSET_URLS; do
         echo -e "\033[36m下载中：$URL\033[0m"
-        wget -q --show-progress "$URL" -P /tmp/ || { echo -e "\033[31m下载失败：$URL\033[0m"; return 1; }
+        wget -q --show-progress "$URL" -P /tmp/ || {
+            echo -e "\033[31m下载失败：$URL\033[0m"
+            return 1
+        }
     done
 
     install_packages
@@ -1270,108 +1276,108 @@ echo -n -e "\033[36m请选择一个操作 (1-12) (｡･ω･｡): \033[0m"
 read -r ACTION
 
 case "$ACTION" in
-    1)
-        echo -e "\033[1;32m٩(｡•́‿•̀｡)۶ 您选择了安装或更新 BBR v3！\033[0m"
-        select_kernel_profile && install_latest_version "$KERNEL_PROFILE"
-        ;;
-    2)
-        echo -e "\033[1;32m(｡･∀･)ﾉﾞ 您选择了安装指定版本的 BBR！\033[0m"
-        select_kernel_profile && install_specific_version "$KERNEL_PROFILE"
-        ;;
-    3)
-        echo -e "\033[1;32m(｡･ω･｡) 检查是否为 BBR v3...\033[0m"
+1)
+    echo -e "\033[1;32m٩(｡•́‿•̀｡)۶ 您选择了安装或更新 BBR v3！\033[0m"
+    select_kernel_profile && install_latest_version "$KERNEL_PROFILE"
+    ;;
+2)
+    echo -e "\033[1;32m(｡･∀･)ﾉﾞ 您选择了安装指定版本的 BBR！\033[0m"
+    select_kernel_profile && install_specific_version "$KERNEL_PROFILE"
+    ;;
+3)
+    echo -e "\033[1;32m(｡･ω･｡) 检查是否为 BBR v3...\033[0m"
+    BBR_MODULE_INFO=$(modinfo tcp_bbr 2>/dev/null)
+    if [[ -z "$BBR_MODULE_INFO" ]]; then
+        echo -e "\033[36m正在刷新模块依赖...\033[0m"
+        depmod -a
         BBR_MODULE_INFO=$(modinfo tcp_bbr 2>/dev/null)
-        if [[ -z "$BBR_MODULE_INFO" ]]; then
-            echo -e "\033[36m正在刷新模块依赖...\033[0m"
-            depmod -a
-            BBR_MODULE_INFO=$(modinfo tcp_bbr 2>/dev/null)
-        fi
-        if [[ -z "$BBR_MODULE_INFO" ]]; then
-            echo -e "\033[31m(⊙﹏⊙) 未加载 tcp_bbr 模块，无法检查版本。请先安装内核并重启。\033[0m"
-            exit 1
-        fi
-        BBR_VERSION=$(echo "$BBR_MODULE_INFO" | awk '/^version:/ {print $2}')
-        if [[ "$BBR_VERSION" == "3" ]]; then
-            echo -e "\033[36m✔ BBR 模块版本：\033[0m\033[1;32m$BBR_VERSION (v3)\033[0m"
-        else
-            echo -e "\033[33m(￣﹃￣) 检测到 BBR 模块，但版本是：$BBR_VERSION，不是 v3！\033[0m"
-        fi
-        
-        CURRENT_ALGO=$(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}')
-        if [[ "$CURRENT_ALGO" == "bbr" ]]; then
-            echo -e "\033[36m✔ TCP 拥塞控制算法：\033[0m\033[1;32m$CURRENT_ALGO\033[0m"
-        else
-            echo -e "\033[31m(⊙﹏⊙) 当前算法不是 bbr，而是：$CURRENT_ALGO\033[0m"
-        fi
+    fi
+    if [[ -z "$BBR_MODULE_INFO" ]]; then
+        echo -e "\033[31m(⊙﹏⊙) 未加载 tcp_bbr 模块，无法检查版本。请先安装内核并重启。\033[0m"
+        exit 1
+    fi
+    BBR_VERSION=$(echo "$BBR_MODULE_INFO" | awk '/^version:/ {print $2}')
+    if [[ "$BBR_VERSION" == "3" ]]; then
+        echo -e "\033[36m✔ BBR 模块版本：\033[0m\033[1;32m$BBR_VERSION (v3)\033[0m"
+    else
+        echo -e "\033[33m(￣﹃￣) 检测到 BBR 模块，但版本是：$BBR_VERSION，不是 v3！\033[0m"
+    fi
 
-        if [[ "$BBR_VERSION" == "3" && "$CURRENT_ALGO" == "bbr" ]]; then
-            echo -e "\033[1;32mヽ(✿ﾟ▽ﾟ)ノ 检测完成，BBR v3 已正确安装并生效！\033[0m"
-        else
-            echo -e "\033[33mBBR v3 未完全生效。请确保已安装内核并重启，然后使用选项 4-7 启用。\033[0m"
-        fi
+    CURRENT_ALGO=$(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}')
+    if [[ "$CURRENT_ALGO" == "bbr" ]]; then
+        echo -e "\033[36m✔ TCP 拥塞控制算法：\033[0m\033[1;32m$CURRENT_ALGO\033[0m"
+    else
+        echo -e "\033[31m(⊙﹏⊙) 当前算法不是 bbr，而是：$CURRENT_ALGO\033[0m"
+    fi
 
-        if grep -Eq '^\s*blacklist\s+esp4' "$SECURITY_MODPROBE_CONF" 2>/dev/null \
-           && grep -Eq '^\s*blacklist\s+esp6' "$SECURITY_MODPROBE_CONF" 2>/dev/null \
-           && grep -Eq '^\s*blacklist\s+rxrpc' "$SECURITY_MODPROBE_CONF" 2>/dev/null; then
-            echo -e "\033[1;32m✔ Dirty Frag 缓解状态：已启用（esp4/esp6/rxrpc 已黑名单）\033[0m"
-        else
-            echo -e "\033[31m✘ Dirty Frag 缓解状态：未启用\033[0m"
-            echo -e "\033[33m  建议重新运行脚本，或手动写入 $SECURITY_MODPROBE_CONF\033[0m"
-        fi
-        ;;
-    4)
-        echo -e "\033[1;32m(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧ 使用 BBR + FQ 加速！\033[0m"
-        ALGO="bbr"
-        QDISC="fq"
-        ask_to_save
-        ;;
-    5)
-        echo -e "\033[1;32m(๑•̀ㅂ•́)و✧ 使用 BBR + FQ_CODEL 加速！\033[0m"
-        ALGO="bbr"
-        QDISC="fq_codel"
-        ask_to_save
-        ;;
-    6)
-        echo -e "\033[1;32m٩(•‿•)۶ 使用 BBR + FQ_PIE 加速！\033[0m"
-        ALGO="bbr"
-        QDISC="fq_pie"
-        ask_to_save
-        ;;
-    7)
-        echo -e "\033[1;32m(ﾉ≧∀≦)ﾉ 使用 BBR + CAKE 加速！\033[0m"
-        ALGO="bbr"
-        QDISC="cake"
-        ask_to_save
-        ;;
-    8)
-        echo -e "\033[1;32m(๑•̀ㅂ•́)و✧ 您选择了亚太机器 TCP 调优！\033[0m"
-        apply_apac_tuning
-        ;;
-    9)
-        echo -e "\033[1;32mヽ(・∀・)ノ 您选择了卸载 BBR 内核！\033[0m"
-        PACKAGES_TO_REMOVE=$(dpkg -l | grep "joeyblog" | awk '{print $2}' | tr '\n' ' ')
-        if [[ -n "$PACKAGES_TO_REMOVE" ]]; then
-            echo -e "\033[36m将要卸载以下内核包: \033[33m$PACKAGES_TO_REMOVE\033[0m"
-            sudo apt-get remove --purge $PACKAGES_TO_REMOVE -y
-            update_bootloader
-            echo -e "\033[1;32m内核包已卸载。请记得重启系统。\033[0m"
-        else
-            echo -e "\033[33m未找到由本脚本安装的 'joeyblog' 内核包。\033[0m"
-        fi
-        ;;
-    10)
-        echo -e "\033[1;32m(๑•̀ㅂ•́)و✧ 您选择了 BBR v3 智能带宽优化！\033[0m"
-        apply_smart_bandwidth_tuning
-        ;;
-    11)
-        echo -e "\033[1;32m(๑•̀ㅂ•́)و✧ 您选择了清空网络优化配置！\033[0m"
-        clear_network_optimizations
-        ;;
-    12)
-        echo -e "\033[1;32m(╯°□°）╯ 您选择了 BBR v3 疯批模式！\033[0m"
-        apply_extreme_speedtest_tuning
-        ;;
-    *)
-        echo -e "\033[31m(￣▽￣)ゞ 无效的选项，请输入 1-12 之间的数字哦~\033[0m"
-        ;;
+    if [[ "$BBR_VERSION" == "3" && "$CURRENT_ALGO" == "bbr" ]]; then
+        echo -e "\033[1;32mヽ(✿ﾟ▽ﾟ)ノ 检测完成，BBR v3 已正确安装并生效！\033[0m"
+    else
+        echo -e "\033[33mBBR v3 未完全生效。请确保已安装内核并重启，然后使用选项 4-7 启用。\033[0m"
+    fi
+
+    if grep -Eq '^\s*blacklist\s+esp4' "$SECURITY_MODPROBE_CONF" 2>/dev/null &&
+        grep -Eq '^\s*blacklist\s+esp6' "$SECURITY_MODPROBE_CONF" 2>/dev/null &&
+        grep -Eq '^\s*blacklist\s+rxrpc' "$SECURITY_MODPROBE_CONF" 2>/dev/null; then
+        echo -e "\033[1;32m✔ Dirty Frag 缓解状态：已启用（esp4/esp6/rxrpc 已黑名单）\033[0m"
+    else
+        echo -e "\033[31m✘ Dirty Frag 缓解状态：未启用\033[0m"
+        echo -e "\033[33m  建议重新运行脚本，或手动写入 $SECURITY_MODPROBE_CONF\033[0m"
+    fi
+    ;;
+4)
+    echo -e "\033[1;32m(ﾉ◕ヮ◕)ﾉ*:･ﾟ✧ 使用 BBR + FQ 加速！\033[0m"
+    ALGO="bbr"
+    QDISC="fq"
+    ask_to_save
+    ;;
+5)
+    echo -e "\033[1;32m(๑•̀ㅂ•́)و✧ 使用 BBR + FQ_CODEL 加速！\033[0m"
+    ALGO="bbr"
+    QDISC="fq_codel"
+    ask_to_save
+    ;;
+6)
+    echo -e "\033[1;32m٩(•‿•)۶ 使用 BBR + FQ_PIE 加速！\033[0m"
+    ALGO="bbr"
+    QDISC="fq_pie"
+    ask_to_save
+    ;;
+7)
+    echo -e "\033[1;32m(ﾉ≧∀≦)ﾉ 使用 BBR + CAKE 加速！\033[0m"
+    ALGO="bbr"
+    QDISC="cake"
+    ask_to_save
+    ;;
+8)
+    echo -e "\033[1;32m(๑•̀ㅂ•́)و✧ 您选择了亚太机器 TCP 调优！\033[0m"
+    apply_apac_tuning
+    ;;
+9)
+    echo -e "\033[1;32mヽ(・∀・)ノ 您选择了卸载 BBR 内核！\033[0m"
+    PACKAGES_TO_REMOVE=$(dpkg -l | grep "joeyblog" | awk '{print $2}' | tr '\n' ' ')
+    if [[ -n "$PACKAGES_TO_REMOVE" ]]; then
+        echo -e "\033[36m将要卸载以下内核包: \033[33m$PACKAGES_TO_REMOVE\033[0m"
+        sudo apt-get remove --purge $PACKAGES_TO_REMOVE -y
+        update_bootloader
+        echo -e "\033[1;32m内核包已卸载。请记得重启系统。\033[0m"
+    else
+        echo -e "\033[33m未找到由本脚本安装的 'joeyblog' 内核包。\033[0m"
+    fi
+    ;;
+10)
+    echo -e "\033[1;32m(๑•̀ㅂ•́)و✧ 您选择了 BBR v3 智能带宽优化！\033[0m"
+    apply_smart_bandwidth_tuning
+    ;;
+11)
+    echo -e "\033[1;32m(๑•̀ㅂ•́)و✧ 您选择了清空网络优化配置！\033[0m"
+    clear_network_optimizations
+    ;;
+12)
+    echo -e "\033[1;32m(╯°□°）╯ 您选择了 BBR v3 疯批模式！\033[0m"
+    apply_extreme_speedtest_tuning
+    ;;
+*)
+    echo -e "\033[31m(￣▽￣)ゞ 无效的选项，请输入 1-12 之间的数字哦~\033[0m"
+    ;;
 esac

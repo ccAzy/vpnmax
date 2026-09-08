@@ -5,9 +5,9 @@ arch="${1:?usage: prepare-kernel-config.sh <x86_64|arm64>}"
 
 run_olddefconfig() {
   if [ "$arch" = "arm64" ]; then
-    timeout 300 make ARCH=arm64 olddefconfig < /dev/null
+    timeout 300 make ARCH=arm64 olddefconfig </dev/null
   else
-    timeout 300 make olddefconfig < /dev/null
+    timeout 300 make olddefconfig </dev/null
   fi
 }
 
@@ -110,16 +110,16 @@ validate_config() {
 }
 
 case "$arch" in
-  arm64)
-    cp "$GITHUB_WORKSPACE/arm64.config" .config
-    ;;
-  x86_64)
-    cp "$GITHUB_WORKSPACE/x86-64.config" .config
-    ;;
-  *)
-    echo "ERROR: unsupported arch: $arch"
-    exit 1
-    ;;
+arm64)
+  cp "$GITHUB_WORKSPACE/arm64.config" .config
+  ;;
+x86_64)
+  cp "$GITHUB_WORKSPACE/x86-64.config" .config
+  ;;
+*)
+  echo "ERROR: unsupported arch: $arch"
+  exit 1
+  ;;
 esac
 
 apply_policy_config

@@ -157,15 +157,23 @@ def main() -> None:
 
     high_risk_surface = (aead_cfg in {"y", "m"}) and bind_ok
     reduced_surface = (aead_cfg == "n") or (not bind_ok)
-    dirtyfrag_cfg_exposed = any(v in {"y", "m"} for v in (xfrm_esp, inet_esp, inet6_esp, af_rxrpc))
+    dirtyfrag_cfg_exposed = any(
+        v in {"y", "m"} for v in (xfrm_esp, inet_esp, inet6_esp, af_rxrpc)
+    )
     dirtyfrag_runtime_exposed = esp4_loaded or esp6_loaded or rxrpc_loaded
-    dirtyfrag_high_risk = dirtyfrag_cfg_exposed and (dirtyfrag_runtime_exposed or not dirtyfrag_rules_ok)
-    dirtyfrag_reduced = (not dirtyfrag_cfg_exposed) or (dirtyfrag_rules_ok and not dirtyfrag_runtime_exposed)
+    dirtyfrag_high_risk = dirtyfrag_cfg_exposed and (
+        dirtyfrag_runtime_exposed or not dirtyfrag_rules_ok
+    )
+    dirtyfrag_reduced = (not dirtyfrag_cfg_exposed) or (
+        dirtyfrag_rules_ok and not dirtyfrag_runtime_exposed
+    )
 
     if high_risk_surface:
         print("[!] 检测到高风险暴露面。")
         print("[!] 若内核未包含上游修复补丁，系统可能受 CVE-2026-31431 影响。")
-        print("[!] 建议：升级到新构建内核，或禁用 CRYPTO_USER_API_AEAD；旧内核可临时屏蔽 algif_aead。")
+        print(
+            "[!] 建议：升级到新构建内核，或禁用 CRYPTO_USER_API_AEAD；旧内核可临时屏蔽 algif_aead。"
+        )
     elif reduced_surface:
         print("[+] 风险面已收敛/已缓解。")
     else:
@@ -173,7 +181,9 @@ def main() -> None:
 
     if dirtyfrag_high_risk:
         print("[!] Dirty Frag 风险面暴露。")
-        print("[!] 建议：禁用 XFRM_ESP/INET_ESP/INET6_ESP/AF_RXRPC，并屏蔽 esp4/esp6/rxrpc。")
+        print(
+            "[!] 建议：禁用 XFRM_ESP/INET_ESP/INET6_ESP/AF_RXRPC，并屏蔽 esp4/esp6/rxrpc。"
+        )
     elif dirtyfrag_reduced:
         print("[+] Dirty Frag 风险面已收敛/已缓解。")
     else:
