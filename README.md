@@ -7,6 +7,8 @@
 <h1 align="center">vpnmax</h1>
 <p align="center"><strong>新手友好的 sing-box VPS 一键部署脚本。</strong></p>
 
+<p align="center">基于 <a href="https://github.com/yonggekkk/sing-box-yg">yonggekkk/sing-box-yg</a> 和 <a href="https://github.com/byJoey/Actions-bbr-v3">byJoey/Actions-bbr-v3</a> 的集成、改造与安全加固。</p>
+
 ---
 
 ## 先看这里
@@ -377,13 +379,14 @@ curl -v http://127.0.0.1:订阅端口/token/clmi.yaml
 
 ## 感谢
 
-vpnmax 在以下项目和服务的基础上进行集成、改造和安全加固：
+vpnmax 在以下项目的基础上进行集成、改造和安全加固：
 
 - [yonggekkk/sing-box-yg](https://github.com/yonggekkk/sing-box-yg) — sing-box 管理脚本和部署思路
-- [byJoey/Actions-bbr-v3](https://github.com/byJoey/Actions-bbr-v3) — BBRv3 内核项目上游
-- [Cloudflare](https://www.cloudflare.com/) — Argo 隧道和 WARP 服务
+- [byJoey/Actions-bbr-v3](https://github.com/byJoey/Actions-bbr-v3) — BBRv3 内核构建与调优
 
-感谢上游项目和相关服务。vpnmax 主要增加了固定提交校验、强制 SHA256、独立防火墙链、精确清理、默认安全策略、动态多队列调优和部署后验证。
+vpnmax 主要增加了固定提交校验、强制 SHA256、独立防火墙链、精确清理、默认安全策略、智能带宽调优和部署后验证。
+
+Argo 隧道和 WARP 服务由 [Cloudflare](https://www.cloudflare.com/) 提供。
 
 ---
 
