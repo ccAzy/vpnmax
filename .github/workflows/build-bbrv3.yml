@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   schedule:
     # Daily automatic kernel refresh. BBRv3 itself stays pinned to the repo patch.
-    - cron: "17 3 * * *"
+    - cron: "0 16 * * *"
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
