@@ -1,12 +1,12 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-only
 # ===================================================================
-# vpnplus — sing-box VPN 一键部署（需先执行 deploy_optimize.sh）
+# vpnmax — sing-box VPN 一键部署（需先执行 deploy_optimize.sh）
 # 用法: curl -fsSL .../deploy_singbox.sh | bash
 #
 # 相对旧版 ACVPN 的关键加固：
 #   1. 外部 sb.sh 固定到 commit 5001e76 + 强制 SHA256 校验（失败即中止）
-#   2. 防火墙改独立命名链（ACVPN_ANTIPROBE / ACVPN_PORTHOP），
+#   2. 防火墙改独立命名链（VPNMAX_ANTIPROBE / VPNMAX_PORTHOP），
 #      重跑/卸载绝不按 'limit: above'/'#conn' 全局删 INPUT，保护第三方规则
 #   3. 核心/可选失败语义分离：核心失败 → 不写成功标记；可选失败 → 告警继续
 #   4. 进程清理精确化：busybox 用端口查找，绝不 pkill -x busybox 杀全局
@@ -21,8 +21,8 @@ for _lib in common time firewall singbox subscription argo warp; do
         source "$SCRIPT_DIR/lib/${_lib}.sh" 2>/dev/null || true
     elif [ -f "lib/${_lib}.sh" ]; then
         source "lib/${_lib}.sh" 2>/dev/null || true
-    elif [ -f "/usr/local/lib/vpnplus/${_lib}.sh" ]; then
-        source "/usr/local/lib/vpnplus/${_lib}.sh" 2>/dev/null || true
+    elif [ -f "/usr/local/lib/vpnmax/${_lib}.sh" ]; then
+        source "/usr/local/lib/vpnmax/${_lib}.sh" 2>/dev/null || true
     fi
 done
 
@@ -59,8 +59,8 @@ if ! declare -F sb_feed >/dev/null 2>&1; then
         [ -n "$_new_pids" ] && { for _pid in $_new_pids; do kill -9 "$_pid" 2>/dev/null || true; done; }
         # 输出追加进诊断日志（去色），失败时便于回溯 sb 到底做了什么/卡在哪
         if [ -n "$out" ]; then
-            echo "──[sb_feed t=${secs}] $(date -Is)" >>/var/log/vpnplus-sbfeed.log 2>/dev/null || true
-            printf '%s\n' "$out" | sed -E 's/\x1B\[[0-9;]*[mK]//g' >>/var/log/vpnplus-sbfeed.log 2>/dev/null || true
+            echo "──[sb_feed t=${secs}] $(date -Is)" >>/var/log/vpnmax-sbfeed.log 2>/dev/null || true
+            printf '%s\n' "$out" | sed -E 's/\x1B\[[0-9;]*[mK]//g' >>/var/log/vpnmax-sbfeed.log 2>/dev/null || true
         fi
         printf '%s' "$out"
     }
@@ -76,12 +76,12 @@ for arg in "$@"; do
     --force) FORCE=true ;;
     --help | -h)
         cat <<'HELP'
-vpnplus deploy_singbox.sh — sing-box 一键部署
+vpnmax deploy_singbox.sh — sing-box 一键部署
 用法: bash deploy_singbox.sh [--dry-run] [--reset-sub] [--force]
   --dry-run  只打印将执行的动作，不实际修改系统
   --reset-sub 强制轮转订阅（删除旧 subport/subtoken，生成全新 token/端口）
              等价 RESET_SUB=1 bash deploy_singbox.sh，暴露后一键换链
-  --force    强制重跑全流程（忽略 /etc/.vpnplus-singbox 已部署标记，强制对齐 sb.json/iptables/订阅三处）
+  --force    强制重跑全流程（忽略 /etc/.vpnmax-singbox 已部署标记，强制对齐 sb.json/iptables/订阅三处）
   VMESS_LOCK=on|off  明文 VMess 端口是否封锁公网（默认 off：直连，仅密钥登录无防火墙场景）
   RESET_SUB=1        同 --reset-sub
 HELP
@@ -90,8 +90,8 @@ HELP
     esac
 done
 
-CHECKPOINT="/etc/.vpnplus-singbox"
-MANIFEST="/var/log/vpnplus-singbox-manifest.log"
+CHECKPOINT="/etc/.vpnmax-singbox"
+MANIFEST="/var/log/vpnmax-singbox-manifest.log"
 # 锁定的 sb.sh（vpnmax 融合：仓库自带 vendor/sb.sh，与 ccAzy/sing-box-yg acvpn 分支
 # 2026-08-05 提交字节一致；SB_URL 仅为 vendor 缺失时的自家回退，绝不指向上游）
 SB_COMMIT="5001e76efc9e15eac1f8ff33a0b389172e331e1d"
@@ -414,7 +414,7 @@ if ! declare -F wait_subscription >/dev/null 2>&1; then
     }
 fi
 # ── Hysteria2 + Tuic 端口跳跃（独立命名链，绝不触碰第三方 NAT 规则） ──
-CHAIN_PORTHOP="ACVPN_PORTHOP"
+CHAIN_PORTHOP="VPNMAX_PORTHOP"
 if ! declare -F config_port_hopping >/dev/null 2>&1; then
     config_port_hopping() {
         [ -f /etc/s-box/sb.json ] || {
@@ -426,7 +426,9 @@ if ! declare -F config_port_hopping >/dev/null 2>&1; then
         HY_PORT=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' /etc/s-box/sb.json 2>/dev/null || true)
         TU_PORT=$(jq -r '.inbounds[] | select(.type=="tuic") | .listen_port' /etc/s-box/sb.json 2>/dev/null || true)
 
-        # 清理旧 ACVPN_PORTHOP 链（幂等，不碰系统其他 nat 规则）
+        # 品牌切割：先拆旧 ACVPN_* 链
+        if declare -F migrate_legacy_chains >/dev/null 2>&1; then migrate_legacy_chains || true; fi
+        # 清理旧 VPNMAX_PORTHOP 链（幂等，不碰系统其他 nat 规则）
         run iptables -t nat -D PREROUTING -j "$CHAIN_PORTHOP" 2>/dev/null || true
         run iptables -t nat -F "$CHAIN_PORTHOP" 2>/dev/null || true
         run iptables -t nat -X "$CHAIN_PORTHOP" 2>/dev/null || true
@@ -438,12 +440,12 @@ if ! declare -F config_port_hopping >/dev/null 2>&1; then
 
         # 清理 sing-box 透明代理/TUN 残留的孤立端口跳跃规则（重跑会累积指向旧端口的过期 DNAT/REDIRECT）
         # 背景（2026-08-24 HK 实测）：每天重跑前，PREROUTING 里堆积了指向已废弃端口的
-        #   DNAT(40000:42000→旧hy端口 / 43000:45000→旧tu端口) 和重复 REDIRECT，且排在 ACVPN_PORTHOP 之前，
+        #   DNAT(40000:42000→旧hy端口 / 43000:45000→旧tu端口) 和重复 REDIRECT，且排在 VPNMAX_PORTHOP 之前，
         #   优先命中把 hy2/tuic 跳跃段流量引到不存在的端口 → 节点握手无响应、客户端"不通"。
-        # 本段只在确认为 vpnplus 的跳跃段(40000:42000 / 43000:45000 udp)内精确清理，不碰其他 NAT 规则。
+        # 本段只在确认为 vpnmax 的跳跃段(40000:42000 / 43000:45000 udp)内精确清理，不碰其他 NAT 规则。
         info "清理 sing-box 残留的过期端口跳跃规则..."
         local done_hop=false
-        # 按行号删除 PREROUTING 中任何 HOP_HY_RANGE / HOP_TU_RANGE 的 UDP DNAT/REDIRECT（不碰 ACVPN_PORTHOP 链内规则与原样跳转）
+        # 按行号删除 PREROUTING 中任何 HOP_HY_RANGE / HOP_TU_RANGE 的 UDP DNAT/REDIRECT（不碰 VPNMAX_PORTHOP 链内规则与原样跳转）
         while :; do
             local rnum
             rnum=$(iptables -t nat -L PREROUTING -n --line-numbers 2>/dev/null |
@@ -540,7 +542,7 @@ fi
 
 if ! declare -F ensure_singbox_legacy_env >/dev/null 2>&1; then
     ensure_singbox_legacy_env() {
-        local dropin="/etc/systemd/system/sing-box.service.d/99-vpnplus.conf"
+        local dropin="/etc/systemd/system/sing-box.service.d/99-vpnmax.conf"
         if [ ! -f "$dropin" ] || ! grep -q "ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS" "$dropin" 2>/dev/null; then
             if ${DRY_RUN:-false}; then
                 info "[dry-run] 将写入 $dropin: Environment=ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS=true"
@@ -558,7 +560,7 @@ EOF
                 ok "已注入 sing-box 兼容环境变量 ($dropin)"
             fi
             for svc in sb xr; do if [ -f "/etc/systemd/system/${svc}.service" ]; then
-                local d="/etc/systemd/system/${svc}.service.d/99-vpnplus.conf"
+                local d="/etc/systemd/system/${svc}.service.d/99-vpnmax.conf"
                 mkdir -p "$(dirname "$d")" 2>/dev/null || true
                 grep -q "ENABLE_DEPRECATED" "$d" 2>/dev/null || echo -e "[Service]\nEnvironment=ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS=true" >"$d"
             fi; done
@@ -628,6 +630,32 @@ if ! declare -F force_ipv4_lock >/dev/null 2>&1; then
                 warn "出口修复失败，保持原状"
             fi
         else ok "出口已是 prefer_ipv4"; fi
+    }
+fi
+# ── 品牌切割回退：拆除旧 ACVPN_* 链（与 lib/firewall.sh 同逻辑，单文件自包含） ──
+if ! declare -F migrate_legacy_chains >/dev/null 2>&1; then
+    migrate_legacy_chains() {
+        if ${DRY_RUN:-false}; then
+            info "[dry-run] 将拆除旧 ACVPN_* 链"
+            return 0
+        fi
+        local _c
+        for _c in ACVPN_PORTHOP ACVPN_ANTIPROBE ACVPN_RSS; do
+            iptables -D INPUT -j "$_c" 2>/dev/null || true
+            iptables -t nat -D PREROUTING -j "$_c" 2>/dev/null || true
+            iptables -F "$_c" 2>/dev/null || true
+            iptables -t nat -F "$_c" 2>/dev/null || true
+            iptables -X "$_c" 2>/dev/null || true
+            iptables -t nat -X "$_c" 2>/dev/null || true
+            if command -v ip6tables >/dev/null 2>&1; then
+                ip6tables -D INPUT -j "$_c" 2>/dev/null || true
+                ip6tables -t nat -D PREROUTING -j "$_c" 2>/dev/null || true
+                ip6tables -F "$_c" 2>/dev/null || true
+                ip6tables -t nat -F "$_c" 2>/dev/null || true
+                ip6tables -X "$_c" 2>/dev/null || true
+                ip6tables -t nat -X "$_c" 2>/dev/null || true
+            fi
+        done
     }
 fi
 # ── Argo 隧道 ──
@@ -838,7 +866,7 @@ fi
 # ── 安全加固（网络感知：IPv6 无地址才关 RA；rp_filter 可覆盖） ──
 if ! declare -F apply_hardening >/dev/null 2>&1; then
     apply_hardening() {
-        local conf="/etc/sysctl.d/99-vpnplus-security.conf"
+        local conf="/etc/sysctl.d/99-vpnmax-security.conf"
         local v6_ra_lines
         # 检测本机是否有 IPv6 地址（无 v6 才关 RA，避免破坏依赖 RA 获址的 VPS）
         if ! ip -6 addr show scope global 2>/dev/null | grep -q 'inet6'; then
@@ -847,7 +875,7 @@ if ! declare -F apply_hardening >/dev/null 2>&1; then
             v6_ra_lines='# 检测到 IPv6 地址，保留 RA 以防破坏 v6 网络配置'
         fi
         run bash -c "cat > '$conf' <<'SEC'
-# vpnplus 安全加固（网络感知生成）
+# vpnmax 安全加固（网络感知生成）
 net.ipv4.conf.all.rp_filter = 1
 net.ipv4.conf.default.rp_filter = 1
 net.ipv4.tcp_syncookies = 1
@@ -872,7 +900,7 @@ SEC"
         for svc in sing-box sb xr; do
             if [ -f "/etc/systemd/system/${svc}.service" ]; then
                 mkdir -p "/etc/systemd/system/${svc}.service.d" 2>/dev/null || continue
-                run bash -c "cat > '/etc/systemd/system/${svc}.service.d/99-vpnplus.conf' <<'LIMIT'
+                run bash -c "cat > '/etc/systemd/system/${svc}.service.d/99-vpnmax.conf' <<'LIMIT'
 [Service]
 LimitNOFILE=1048576
 LIMIT"
@@ -920,11 +948,11 @@ fi
 if ! declare -F install_argo_keepalive >/dev/null 2>&1; then
     install_argo_keepalive() {
         if $DRY_RUN; then
-            info "[dry-run] 写入 /usr/local/sbin/vpnplus-argo-keepalive.sh（flock互斥+僵死重连+翻动告警）"
+            info "[dry-run] 写入 /usr/local/sbin/vpnmax-argo-keepalive.sh（flock互斥+僵死重连+翻动告警）"
         else
-            cat >/usr/local/sbin/vpnplus-argo-keepalive.sh <<'KEEP'
+            cat >/usr/local/sbin/vpnmax-argo-keepalive.sh <<'KEEP'
 #!/bin/bash
-# vpnplus Argo 临时隧道保活 v3（cron 每 3 分钟）
+# vpnmax Argo 临时隧道保活 v3（cron 每 3 分钟）
 # v3 改进（相对 v2）:
 #   1) flock 互斥：禁止两个实例并发 pkill/重启互踩
 #   2) 进程识别口径与 start_argo 统一（cloudflared tunnel --url 任一端），不再只认 localhost
@@ -937,13 +965,13 @@ FLAP_WINDOW=$((30 * 60))                      # 窗口 30 分钟
 COOLDOWN=$((60 * 60))                         # 翻动后冷却 1 小时
 
 # 互斥锁：已有实例在跑则直接退出（防 cron 与慢重启重叠）
-exec 9>/var/lock/vpnplus-argo-keepalive.lock 2>/dev/null || exit 0
-flock -n 9 2>/dev/null || { logger -t vpnplus-argo "已有保活实例运行，跳过"; exit 0; }
+exec 9>/var/lock/vpnmax-argo-keepalive.lock 2>/dev/null || exit 0
+flock -n 9 2>/dev/null || { logger -t vpnmax-argo "已有保活实例运行，跳过"; exit 0; }
 
 # 探测 cloudflared 真实路径（兼容多安装位置）
 CF_BIN=$(command -v cloudflared 2>/dev/null)
 [ -x "$CF_BIN" ] || CF_BIN=$(ls /etc/s-box/cloudflared /usr/local/bin/cloudflared /opt/cloudflared/cloudflared 2>/dev/null | grep -x '.*cloudflared' | head -1)
-[ -x "${CF_BIN:-}" ] || { logger -t vpnplus-argo "cloudflared 未找到，跳过保活"; exit 0; }
+[ -x "${CF_BIN:-}" ] || { logger -t vpnmax-argo "cloudflared 未找到，跳过保活"; exit 0; }
 
 # 解析 Argo WS 端口：优先取 vless+ws 传输的 inbound；退化取 inbounds[1]（兼容旧配置）
 WS_PORT=$(jq -r '[.inbounds[] | select(.type=="vless" and .transport.type=="ws") | .listen_port][0] // empty' /etc/s-box/sb.json 2>/dev/null)
@@ -986,7 +1014,7 @@ flapping() {
     printf '%s|%s\n' "$now" "$cnt" > "$STATE"
     if [ "$cnt" -ge "$MAX_FLAP" ]; then
         touch /etc/s-box/argo-flapping.marker
-        logger -t vpnplus-argo "Argo 30分钟内连续重连 ${cnt} 次，疑似边缘持续不可达；进入 ${COOLDOWN}s 冷却"
+        logger -t vpnmax-argo "Argo 30分钟内连续重连 ${cnt} 次，疑似边缘持续不可达；进入 ${COOLDOWN}s 冷却"
         return 1
     fi
     return 0
@@ -995,7 +1023,7 @@ flapping() {
 # 若上次翻动仍在冷却期内，直接退出（不空转重启）
 if [ -f /etc/s-box/argo-flapping.marker ]; then
     if [ $(( $(date +%s) - $(stat -c %Y /etc/s-box/argo-flapping.marker 2>/dev/null || echo 0) )) -lt "${COOLDOWN}" ]; then
-        logger -t vpnplus-argo "Argo 冷却期内，跳过本轮"
+        logger -t vpnmax-argo "Argo 冷却期内，跳过本轮"
         exit 0
     fi
     rm -f /etc/s-box/argo-flapping.marker
@@ -1008,7 +1036,7 @@ if ! tunnel_alive; then
     restart_tunnel
     sleep 15
     NEW_URL=$(get_url)
-    if [ -n "$NEW_URL" ]; then refresh_sub; logger -t vpnplus-argo "L1进程缺失已重启, 域名 $OLD_URL -> $NEW_URL, 订阅已同步"; fi
+    if [ -n "$NEW_URL" ]; then refresh_sub; logger -t vpnmax-argo "L1进程缺失已重启, 域名 $OLD_URL -> $NEW_URL, 订阅已同步"; fi
     exit 0
 fi
 
@@ -1017,7 +1045,7 @@ CUR_URL=$(get_url)
 if [ -z "$CUR_URL" ]; then
     restart_tunnel; sleep 15
     NEW_URL=$(get_url)
-    [ -n "$NEW_URL" ] && { refresh_sub; logger -t vpnplus-argo "L2无域名记录已重启, 新域名 $NEW_URL"; }
+    [ -n "$NEW_URL" ] && { refresh_sub; logger -t vpnmax-argo "L2无域名记录已重启, 新域名 $NEW_URL"; }
     exit 0
 fi
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 6 --max-time 12 "$CUR_URL" 2>/dev/null || echo 000)
@@ -1027,7 +1055,7 @@ if [ "$HTTP" = "000" ]; then
     HTTP2=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 6 --max-time 12 "$CUR_URL" 2>/dev/null || echo 000)
     if [ "$HTTP2" = "000" ]; then
         if flapping; then
-            logger -t vpnplus-argo "Argo 频繁重连已触发冷却，跳过本次重启（防域名无限漂移）"
+            logger -t vpnmax-argo "Argo 频繁重连已触发冷却，跳过本次重启（防域名无限漂移）"
             exit 0
         fi
         restart_tunnel
@@ -1035,9 +1063,9 @@ if [ "$HTTP" = "000" ]; then
         NEW_URL=$(get_url)
         if [ -n "$NEW_URL" ] && [ "$NEW_URL" != "$CUR_URL" ]; then
             refresh_sub
-            logger -t vpnplus-argo "L2隧道僵死(HTTP 000x2)已重连换域名 $CUR_URL -> $NEW_URL, 订阅已同步"
+            logger -t vpnmax-argo "L2隧道僵死(HTTP 000x2)已重连换域名 $CUR_URL -> $NEW_URL, 订阅已同步"
         elif [ -n "$NEW_URL" ]; then
-            logger -t vpnplus-argo 'L2隧道僵死已重连(域名未变)'
+            logger -t vpnmax-argo 'L2隧道僵死已重连(域名未变)'
         fi
         exit 0
     fi
@@ -1047,25 +1075,25 @@ fi
 if [ -n "$OLD_URL" ] && grep -q 'trycloudflare' /etc/s-box/jhsub.txt 2>/dev/null; then
     if ! grep -q "$(echo "$OLD_URL" | sed 's|https://||')" /etc/s-box/jhsub.txt 2>/dev/null; then
         refresh_sub
-        logger -t vpnplus-argo 'L3订阅与运行域名不一致, 已补同步'
+        logger -t vpnmax-argo 'L3订阅与运行域名不一致, 已补同步'
     fi
 fi
 exit 0
 KEEP
-            chmod +x /usr/local/sbin/vpnplus-argo-keepalive.sh
+            chmod +x /usr/local/sbin/vpnmax-argo-keepalive.sh
             (
-                crontab -l 2>/dev/null | grep -vE 'vpnplus-argo-keepalive|acvn-argo-keepalive|acvpn-argo-keepalive'
-                echo '*/3 * * * * /usr/local/sbin/vpnplus-argo-keepalive.sh > /dev/null 2>&1'
+                crontab -l 2>/dev/null | grep -vE 'vpnmax-argo-keepalive|vpnplus-argo-keepalive|acvpn-argo-keepalive|acvn-argo-keepalive'
+                echo '*/3 * * * * /usr/local/sbin/vpnmax-argo-keepalive.sh > /dev/null 2>&1'
             ) | crontab - 2>/dev/null || true
         fi
         ok "Argo 保活 v3 已安装（每 3 分钟：flock互斥 + 进程/HTTP 双检 + 僵死重连换域名同步订阅 + 翻动冷却）"
     }
 fi
 # ── iptables 持久化（三层兜底 + 自建恢复 unit，防重启后端口跳跃/防探测规则丢失） ──
-# 背景（2026-08-25 审计）：旧实现第三层 iptables-save 只写文件、无开机加载，重启后 ACVPN_* 链丢失。
+# 背景（2026-08-25 审计）：旧实现第三层 iptables-save 只写文件、无开机加载，重启后 VPNMAX_* 链丢失。
 # 现做两层保障：
 #   1) 优先用 netfilter-persistent 存储（Debian iptables-persistent，开机由 network-pre.target 自动恢复）
-#   2) 否则写 /etc/iptables/rules.v4|v6 并注册 vpnplus-netfilter-restore.service（network-pre.target 前恢复）
+#   2) 否则写 /etc/iptables/rules.v4|v6 并注册 vpnmax-netfilter-restore.service（network-pre.target 前恢复）
 if ! declare -F persist_firewall >/dev/null 2>&1; then
     persist_firewall() {
         if $DRY_RUN; then
@@ -1085,9 +1113,9 @@ if ! declare -F persist_firewall >/dev/null 2>&1; then
         iptables-save >/etc/iptables/rules.v4 2>/dev/null || true
         ip6tables-save >/etc/iptables/rules.v6 2>/dev/null || true
         if [ -s /etc/iptables/rules.v4 ]; then
-            cat >/etc/systemd/system/vpnplus-netfilter-restore.service <<'UNIT'
+            cat >/etc/systemd/system/vpnmax-netfilter-restore.service <<'UNIT'
 [Unit]
-Description=vpnplus iptables restore (before network)
+Description=vpnmax iptables restore (before network)
 DefaultDependencies=no
 Before=network-pre.target
 Wants=network-pre.target
@@ -1102,29 +1130,29 @@ ExecStart=/usr/sbin/ip6tables-restore -n /etc/iptables/rules.v6
 WantedBy=multi-user.target
 UNIT
             systemctl daemon-reload 2>/dev/null || true
-            if systemctl enable vpnplus-netfilter-restore.service 2>/dev/null; then
-                ok "vpnplus-netfilter-restore.service 已启用（开机恢复新链规则，双保险）"
+            if systemctl enable vpnmax-netfilter-restore.service 2>/dev/null; then
+                ok "vpnmax-netfilter-restore.service 已启用（开机恢复新链规则，双保险）"
                 saved=true
             else
-                warn "enabling vpnplus-netfilter-restore.service 失败"
+                warn "enabling vpnmax-netfilter-restore.service 失败"
             fi
         fi
         $saved || warn "防火墙规则未能持久化（重启后需重新配置）"
         return 0
     }
 fi
-# ── 日志轮转（防 vpnplus 长期运行日志无限膨胀） ──
+# ── 日志轮转（防 vpnmax 长期运行日志无限膨胀） ──
 if ! declare -F setup_logrotate >/dev/null 2>&1; then
     setup_logrotate() {
         if $DRY_RUN; then
-            info "[dry-run] 安装 /etc/logrotate.d/vpnplus（轮转 vpnplus 各类日志）"
+            info "[dry-run] 安装 /etc/logrotate.d/vpnmax（轮转 vpnmax 各类日志）"
             return 0
         fi
-        cat >/etc/logrotate.d/vpnplus <<'ROT'
-/var/log/vpnplus-optimize.log
-/var/log/vpnplus-optimize-manifest.log
-/var/log/vpnplus-singbox-manifest.log
-/var/log/vpnplus-sbfeed.log
+        cat >/etc/logrotate.d/vpnmax <<'ROT'
+/var/log/vpnmax-optimize.log
+/var/log/vpnmax-optimize-manifest.log
+/var/log/vpnmax-singbox-manifest.log
+/var/log/vpnmax-sbfeed.log
 /etc/s-box/argo.log
 {
     weekly
@@ -1136,10 +1164,10 @@ if ! declare -F setup_logrotate >/dev/null 2>&1; then
     copytruncate
 }
 ROT
-        chmod 0644 /etc/logrotate.d/vpnplus 2>/dev/null || true
+        chmod 0644 /etc/logrotate.d/vpnmax 2>/dev/null || true
         # 若 logrotate 服务在则检查配置语法
-        command -v logrotate >/dev/null 2>&1 && logrotate -d /etc/logrotate.d/vpnplus >/dev/null 2>&1 &&
-            ok "日志轮转已配置 (/etc/logrotate.d/vpnplus，周轮+保留4份+压缩)" ||
+        command -v logrotate >/dev/null 2>&1 && logrotate -d /etc/logrotate.d/vpnmax >/dev/null 2>&1 &&
+            ok "日志轮转已配置 (/etc/logrotate.d/vpnmax，周轮+保留4份+压缩)" ||
             warn "logrotate 配置已写，但语法校验未通过或 logrotate 未安装（日志将不轮转）"
         return 0
     }
@@ -1190,7 +1218,7 @@ fi
 if ! declare -F fix_mport_dup >/dev/null 2>&1; then
     fix_mport_dup() {
         # sb 的 hy2 mport 来源是: iptables -t nat -nL | grep hy2_port | awk '{print $8}'
-        # 若 PREROUTING 残留 + ACVPN_PORTHOP 各有一条 DNAT，sb 会拼成 "40000-42000,40000-42000"。
+        # 若 PREROUTING 残留 + VPNMAX_PORTHOP 各有一条 DNAT，sb 会拼成 "40000-42000,40000-42000"。
         # 这里做幂等去重：对 hy2.txt / jhsub.txt / websbox 副本的 mport= 去重逗号段。
         local changed=false f
         for f in /etc/s-box/hy2.txt /etc/s-box/jhsub.txt; do
@@ -1198,7 +1226,7 @@ if ! declare -F fix_mport_dup >/dev/null 2>&1; then
             # 仅当出现重复逗号段时处理
             if grep -q 'mport=' "$f" 2>/dev/null && grep -q 'mport=.*,' "$f" 2>/dev/null; then
                 local tmp
-                tmp=$(mktemp /tmp/vpnplus-mport.XXXXXX)
+                tmp=$(mktemp /tmp/vpnmax-mport.XXXXXX)
                 # 逐行：把 mport= 后的逗号列表去重（保留首次出现顺序）
                 python3 - "$f" "$tmp" <<'PY' 2>/dev/null || true
 import sys, re
@@ -1279,8 +1307,8 @@ if ! declare -F show_subscription >/dev/null 2>&1; then
         return 0
     }
 fi
-# ── 防主动探测（独立命名链；重跑/卸载只动 ACVPN_ANTIPROBE，绝不 delete 全局 INPUT 规则） ──
-CHAIN_ANTIPROBE="ACVPN_ANTIPROBE"
+# ── 防主动探测（独立命名链；重跑/卸载只动 VPNMAX_ANTIPROBE，绝不 delete 全局 INPUT 规则） ──
+CHAIN_ANTIPROBE="VPNMAX_ANTIPROBE"
 if ! declare -F apply_antiprobe >/dev/null 2>&1; then
     apply_antiprobe() {
         [ -f /etc/s-box/sb.json ] || {
@@ -1300,6 +1328,8 @@ if ! declare -F apply_antiprobe >/dev/null 2>&1; then
             else TCP_PORTS+=("$p"); fi
         done < <(jq -r '.inbounds[] | "\(.listen_port)|\(.type)|\(.tls.enabled // "false")"' /etc/s-box/sb.json 2>/dev/null || true)
 
+        # 品牌切割：先拆旧 ACVPN_* 链，再彻底重建新链（幂等且不碰第三方规则）
+        if declare -F migrate_legacy_chains >/dev/null 2>&1; then migrate_legacy_chains || true; fi
         # 先彻底重建链：删跳转 → flush → delete（幂等且不碰第三方规则）
         run iptables -D INPUT -j "$CHAIN_ANTIPROBE" 2>/dev/null || true
         run iptables -F "$CHAIN_ANTIPROBE" 2>/dev/null || true
@@ -1374,6 +1404,8 @@ fi
 main() {
     logo() { :; }
     if $DRY_RUN; then echo -e "${YELLOW}═══ DRY-RUN 模式：仅预览，不修改系统 ═══${N}"; fi
+    # 品牌切割：先接管旧 vpnplus 资产（units/keepalive/cron/marker），再走新流程
+    if declare -F migrate_legacy_units >/dev/null 2>&1; then migrate_legacy_units || true; fi
 
     # 失败 trap：半成品状态下明确给出恢复指引，而不是带着半配置退出
     trap_interrupt() {
@@ -1386,7 +1418,7 @@ main() {
         info "  1) 先安全预览: bash cleanup.sh --force --dry-run —— 看会清哪些东西"
         info "  2) 若只是刚才某步失败，可直接: bash deploy_singbox.sh 重跑（幂等）"
         info "  3) 想彻底重建: bash cleanup.sh --force && bash deploy_singbox.sh"
-        info "  sb_feed 详细日志在 /var/log/vpnplus-sbfeed.log（本次 sb 交互输出，便于回溯卡点）"
+        info "  sb_feed 详细日志在 /var/log/vpnmax-sbfeed.log（本次 sb 交互输出，便于回溯卡点）"
         return $rc
     }
     trap 'trap_interrupt' EXIT
@@ -1426,7 +1458,7 @@ main() {
             if [ -n "$ver" ]; then
                 info "sb 版本指纹: $ver（脚本投喂序列按锁定 SB_COMMIT 编写）"
                 if ! printf '%s' "$ver" | grep -qE '^v2'; then
-                    warn "sb 版本 $ver 不是脚本预期的 v2x 系列，菜单序号可能漂移；若后续步骤失败请核对 SB_COMMIT/SB_SHA256 并检查 /var/log/vpnplus-sbfeed.log"
+                    warn "sb 版本 $ver 不是脚本预期的 v2x 系列，菜单序号可能漂移；若后续步骤失败请核对 SB_COMMIT/SB_SHA256 并检查 /var/log/vpnmax-sbfeed.log"
                 fi
             else
                 info "[sb] 未从横幅识别到版本号，继续（依赖 SB_SHA256 锁定的菜单结构）"
@@ -1435,7 +1467,7 @@ main() {
             return 0
         }
     fi
-    if [ -f /etc/.vpnplus-singbox ]; then :; else assert_sb_menu; fi
+    if [ -f /etc/.vpnmax-singbox ]; then :; else assert_sb_menu; fi
 
     # 时间校准必须在安装前完成（否则 Reality/VMess 握手 bad timestamp）
     ensure_time_sync

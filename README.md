@@ -4,14 +4,14 @@
   <img src="https://img.shields.io/badge/service-sing--box-blue" alt="sing-box">
 </p>
 
-<h1 align="center">vpnplus</h1>
+<h1 align="center">vpnmax</h1>
 <p align="center"><strong>新手友好的 sing-box VPS 一键部署脚本。</strong></p>
 
 ---
 
 ## 先看这里
 
-vpnplus 用来在 Debian/Ubuntu VPS 上快速部署代理节点，并自动完成：
+vpnmax 用来在 Debian/Ubuntu VPS 上快速部署代理节点，并自动完成：
 
 - BBRv3 和基础网络优化（幂等，重跑自动跳过）
 - sing-box 节点安装
@@ -168,16 +168,16 @@ sb
 网络调优服务：
 
 ```bash
-systemctl status vpnplus-net-tuning.service
-journalctl -u vpnplus-net-tuning.service --no-pager
+systemctl status vpnmax-net-tuning.service
+journalctl -u vpnmax-net-tuning.service --no-pager
 ```
 
 部署日志：
 
 ```text
-/var/log/vpnplus-optimize.log
-/var/log/vpnplus-optimize-manifest.log
-/var/log/vpnplus-singbox-manifest.log
+/var/log/vpnmax-optimize.log
+/var/log/vpnmax-optimize-manifest.log
+/var/log/vpnmax-singbox-manifest.log
 ```
 
 ---
@@ -188,11 +188,11 @@ journalctl -u vpnplus-net-tuning.service --no-pager
 
 ```bash
 bash deploy_singbox.sh --force
-# 等价 rm -f /etc/.vpnplus-singbox && bash deploy_singbox.sh
+# 等价 rm -f /etc/.vpnmax-singbox && bash deploy_singbox.sh
 # 裸装：bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_singbox.sh) --force
 ```
 
-旧写法 `rm -f /etc/.vpnplus-singbox && bash deploy_singbox.sh` 仍可用，`--force` 是同一逻辑的显式开关，会强制对齐 `sb.json/iptables/订阅` 三处（专治 `vi sb.json` 后被 `@reboot 9-1` 刷回来的岔裂）。
+旧写法 `rm -f /etc/.vpnmax-singbox && bash deploy_singbox.sh` 仍可用，`--force` 是同一逻辑的显式开关，会强制对齐 `sb.json/iptables/订阅` 三处（专治 `vi sb.json` 后被 `@reboot 9-1` 刷回来的岔裂）。
 
 脚本已处理重跑稳定性的几个坑：
 
@@ -221,7 +221,7 @@ RESET_SUB=1 bash deploy_singbox.sh
 lib/common.sh      # 日志/颜色/BASE_PACKAGES+chrony
 lib/time.sh        # ensure_time_sync / check_time_sync
 lib/optimize.sh    # BBRv3 + sysctl/ethtool/qdisc（按内存分级）
-lib/firewall.sh    # ACVPN_* 链 + 跳跃 DNAT + 清理
+lib/firewall.sh    # VPNMAX_* 链 + 跳跃 DNAT + 清理
 lib/singbox.sh     # sb_feed / sb 安装
 lib/subscription.sh# KEEP_PORT + RESET_SUB
 lib/argo.sh        # Argo + keepalive v3
@@ -269,19 +269,19 @@ bash cleanup.sh
 清理脚本会先把防火墙规则备份到：
 
 ```text
-/var/backups/vpnplus/
+/var/backups/vpnmax/
 ```
 
-它只清理 vpnplus 自己的配置、服务、订阅进程、网络调优服务和 `ACVPN_*` 独立防火墙链，不会按关键词全局删除 Docker、fail2ban 或其他程序的规则。
+它只清理 vpnmax 自己的配置、服务、订阅进程、网络调优服务和 `VPNMAX_*` 独立防火墙链，不会按关键词全局删除 Docker、fail2ban 或其他程序的规则。
 
 卸载后即回到干净状态，可直接部署你自己的面板（3x-ui、marzban 等）。卸载清单：
 
 - 服务：sing-box / sb / xr / cloudflared / 网络调优 / iptables 恢复 unit（含 drop-in 注入的环境变量，不会污染你自建的同名服务）
-- 文件：`/etc/s-box`（含 sing-box 二进制、证书私钥、sb.json）、`/usr/bin/sb`、`/root/websbox`、保活/调优脚本、`/var/log/vpnplus-*.log` 全部审计日志（不留 IP/token 痕迹）
-- 防火墙：`ACVPN_*` 独立链 + 端口跳跃 DNAT + sysctl 加固文件；不碰 fail2ban/Docker 等第三方规则
-- 定时任务：仅删 vpnplus/sb 自己的 crontab 条目
+- 文件：`/etc/s-box`（含 sing-box 二进制、证书私钥、sb.json）、`/usr/bin/sb`、`/root/websbox`、保活/调优脚本、`/var/log/vpnmax-*.log` 全部审计日志（不留 IP/token 痕迹）
+- 防火墙：`VPNMAX_*` 独立链 + 端口跳跃 DNAT + sysctl 加固文件；不碰 fail2ban/Docker 等第三方规则
+- 定时任务：仅删 vpnmax/sb 自己的 crontab 条目
 
-有意保留（对新面板有益，无需卸）：BBRv3 内核与网络优化、`gai.conf` IPv4 优先、`/var/backups/vpnplus` 防火墙备份（确认新面板正常后可手动删）。
+有意保留（对新面板有益，无需卸）：BBRv3 内核与网络优化、`gai.conf` IPv4 优先、`/var/backups/vpnmax` 防火墙备份（确认新面板正常后可手动删）。
 
 清理脚本会先把防火墙规则备份到：
 
@@ -301,7 +301,7 @@ dpkg --list | grep linux-image
 然后可以删除标记重试：
 
 ```bash
-rm -f /etc/.vpnplus-optimized
+rm -f /etc/.vpnmax-optimized
 bash deploy_optimize.sh
 ```
 
@@ -342,7 +342,7 @@ curl -v http://127.0.0.1:订阅端口/token/clmi.yaml
 
 ---
 
-## vpnmax 融合说明（相对 vpnplus 的增量）
+## vpnmax 融合说明（相对 vpnmax 的增量）
 
 - **sb 零上游**：`vendor/sb.sh` 入仓，部署优先本地拷贝，缺失才回退自家 raw，全程 SHA256 校验；`SB_URL` 已指向自家仓库。
 - **边缘优选**：`lib/edgeprefer.sh` 在 Argo 启动前采样官方段，选最优 colo 与 v4/v6 家族，经 `argo-extra.conf` 注入隧道；`EDGE_PREFER=off` 可跳过，`ARGO_REGION=xx` 可手动 pin region。
@@ -351,14 +351,14 @@ curl -v http://127.0.0.1:订阅端口/token/clmi.yaml
 
 ## 感谢
 
-vpnplus 在以下项目和服务的基础上进行集成、改造和安全加固：
+vpnmax 在以下项目和服务的基础上进行集成、改造和安全加固：
 
 - [yonggekkk/sing-box-yg](https://github.com/yonggekkk/sing-box-yg) — sing-box 管理脚本和部署思路
 - [byJoey/Actions-bbr-v3](https://github.com/byJoey/Actions-bbr-v3) — BBRv3 内核项目上游
 - [ccAzy/Actions-bbr-v3](https://github.com/ccAzy/Actions-bbr-v3) — 当前脚本使用的 BBRv3 Release 派生仓库
 - [Cloudflare](https://www.cloudflare.com/) — Argo 隧道和 WARP 服务
 
-感谢上游项目和相关服务。vpnplus 主要增加了固定提交校验、强制 SHA256、独立防火墙链、精确清理、默认安全策略、动态多队列调优和部署后验证。
+感谢上游项目和相关服务。vpnmax 主要增加了固定提交校验、强制 SHA256、独立防火墙链、精确清理、默认安全策略、动态多队列调优和部署后验证。
 
 ---
 

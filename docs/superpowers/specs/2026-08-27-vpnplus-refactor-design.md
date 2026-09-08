@@ -1,6 +1,6 @@
-# vpnplus 重构设计 — 稳定优先的保守拆分
+# vpnmax 重构设计 — 稳定优先的保守拆分
 
-> 目标：在不加固定隧道等额外资产、不加版本号的前提下，把 5 个单体 bash 拆成可低成本变更的系统，满足 a稳定 > c改动成本 > b高效，且保持 `bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnplus/main/deploy_singbox.sh) | bash` 100% 兼容。
+> 目标：在不加固定隧道等额外资产、不加版本号的前提下，把 5 个单体 bash 拆成可低成本变更的系统，满足 a稳定 > c改动成本 > b高效，且保持 `bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_singbox.sh) | bash` 100% 兼容。
 
 ## 1. 现状与约束
 
@@ -13,7 +13,7 @@
 薄入口 + `lib/` 单职责。
 
 ```
-vpnplus/
+vpnmax/
 ├── bootstrap.sh            # 10行：source lib/common.sh; source lib/time.sh; 校验+调common
 ├── deploy_optimize.sh      # ~200行 编排：check_env -> install_deps -> ensure_time_sync -> bbr -> sysctl
 ├── deploy_singbox.sh       # ~250行 编排：ensure_time_sync -> sb -> subscription -> hopping -> argo -> firewall -> warp
@@ -40,7 +40,7 @@ vpnplus/
 
 * **common.sh**：日志、颜色、manifest、trap、BASE_PACKAGES 列表（含 chrony）
 * **time.sh**：`ensure_time_sync()` 写 `/etc/chrony/chrony.conf`（国内源 + makestep 1 3 + rtcsync）→ `enable --now` → `makestep` → 校验 `Leap Normal`；`check_time_sync()` 供 `verify.sh` 调用，含 `ntpdate -q` 偏移提示
-* **firewall.sh**：独立链 `ACVPN_ANTIPROBE/ACVPN_PORTHOP` 的创建/清理/持久化（`persist_firewall` 双保险：netfilter-persistent + `vpnplus-netfilter-restore.service`），清理 PREROUTING 残留跳跃段
+* **firewall.sh**：独立链 `VPNMAX_ANTIPROBE/VPNMAX_PORTHOP` 的创建/清理/持久化（`persist_firewall` 双保险：netfilter-persistent + `vpnmax-netfilter-restore.service`），清理 PREROUTING 残留跳跃段
 * **singbox.sh**：`sb.sh` 的固定 commit + SHA256 强制校验、重跑哈希复审、`sb_feed` 的 PID 差集精确清理 + 去色落盘
 * **subscription.sh**：`KEEP_PORT` 复用 + `RESET_SUB=1/--reset-sub` 强制轮转（删 `subport.log/subtoken.log/websbox/*` 再重建）
 * **argo.sh**：`--protocol auto` 补丁、`keepalive v3`（flock + 双检 + 翻滚冷却 5次/30min → 1h）
@@ -62,7 +62,7 @@ cleanup.sh -> bak_firewall -> clean_chains(lib) -> stop_services -> kill_procs -
 ## 5. 错误处理与幂等
 
 * `set -euo pipefail` 全局，`run()` 包装对 `DRY_RUN` 的短路；可选步骤 `|| warn` 继续，核心步骤 `|| DEPLOY_OK=false` 不写 MARK
-* `sb_feed` 超时 + PID 差集 + 去色日志落 `/var/log/vpnplus-sbfeed.log`
+* `sb_feed` 超时 + PID 差集 + 去色日志落 `/var/log/vpnmax-sbfeed.log`
 * `KEEP_PORT` 合法性校验 1024-65535，`RESET_SUB` 前置清理，`config_port_hopping` 先清 PREROUTING 残留再建链
 * `persist_firewall` 与 `setup_logrotate` 均幂等，多次跑不叠加
 * 失败 trap 统一指引：`cleanup --dry-run` 预览 / 重跑 / 彻底重建
@@ -72,7 +72,7 @@ cleanup.sh -> bak_firewall -> clean_chains(lib) -> stop_services -> kill_procs -
 * `bash -n` + `shellcheck -S warning` 门禁（已过，仅 `patched_ok` 一个可忽略 warning）
 * `bats` 单测：`lib/time.sh`（chrony Normal）、`lib/firewall.sh`（链存在/DNAT指向）、`lib/verify/tuic.sh`（污染/回环）
 * `verify.sh` 从自检升级为端到端：`ss -tlnp` + `iptables -L` + `127.0.0.1 TUIC 204` + `curl 订阅 200`，区分本机坏 vs 外网墙
-* 日志：`/var/log/vpnplus-*.log` + `manifest` + `sbfeed.log`，`logrotate` 周轮 4 份
+* 日志：`/var/log/vpnmax-*.log` + `manifest` + `sbfeed.log`，`logrotate` 周轮 4 份
 
 ## 7. 交付与兼容
 

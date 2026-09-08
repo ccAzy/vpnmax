@@ -1,7 +1,7 @@
 #!/bin/bash
 # lib/argo.sh — Argo 隧道
-[ -n "${VPNPLUS_ARGO_LOADED:-}" ] && return 0
-VPNPLUS_ARGO_LOADED=1
+[ -n "${VPNMAX_ARGO_LOADED:-}" ] && return 0
+VPNMAX_ARGO_LOADED=1
 
 start_argo() {
     [ -f /etc/s-box/sb.json ] || {
@@ -106,11 +106,11 @@ ensure_argo_extra_applied() {
 
 install_argo_keepalive() {
     if $DRY_RUN; then
-        info "[dry-run] 写入 /usr/local/sbin/vpnplus-argo-keepalive.sh（flock互斥+僵死重连+翻动告警）"
+        info "[dry-run] 写入 /usr/local/sbin/vpnmax-argo-keepalive.sh（flock互斥+僵死重连+翻动告警）"
     else
-        cat >/usr/local/sbin/vpnplus-argo-keepalive.sh <<'KEEP'
+        cat >/usr/local/sbin/vpnmax-argo-keepalive.sh <<'KEEP'
 #!/bin/bash
-# vpnplus Argo 临时隧道保活 v3（cron 每 3 分钟）
+# vpnmax Argo 临时隧道保活 v3（cron 每 3 分钟）
 # v3 改进（相对 v2）:
 #   1) flock 互斥：禁止两个实例并发 pkill/重启互踩
 #   2) 进程识别口径与 start_argo 统一（cloudflared tunnel --url 任一端），不再只认 localhost
@@ -123,13 +123,13 @@ FLAP_WINDOW=$((30 * 60))                      # 窗口 30 分钟
 COOLDOWN=$((60 * 60))                         # 翻动后冷却 1 小时
 
 # 互斥锁：已有实例在跑则直接退出（防 cron 与慢重启重叠）
-exec 9>/var/lock/vpnplus-argo-keepalive.lock 2>/dev/null || exit 0
-flock -n 9 2>/dev/null || { logger -t vpnplus-argo "已有保活实例运行，跳过"; exit 0; }
+exec 9>/var/lock/vpnmax-argo-keepalive.lock 2>/dev/null || exit 0
+flock -n 9 2>/dev/null || { logger -t vpnmax-argo "已有保活实例运行，跳过"; exit 0; }
 
 # 探测 cloudflared 真实路径（兼容多安装位置）
 CF_BIN=$(command -v cloudflared 2>/dev/null)
 [ -x "$CF_BIN" ] || CF_BIN=$(ls /etc/s-box/cloudflared /usr/local/bin/cloudflared /opt/cloudflared/cloudflared 2>/dev/null | grep -x '.*cloudflared' | head -1)
-[ -x "${CF_BIN:-}" ] || { logger -t vpnplus-argo "cloudflared 未找到，跳过保活"; exit 0; }
+[ -x "${CF_BIN:-}" ] || { logger -t vpnmax-argo "cloudflared 未找到，跳过保活"; exit 0; }
 
 # 解析 Argo WS 端口：优先取 vless+ws 传输的 inbound；退化取 inbounds[1]（兼容旧配置）
 WS_PORT=$(jq -r '[.inbounds[] | select(.type=="vless" and .transport.type=="ws") | .listen_port][0] // empty' /etc/s-box/sb.json 2>/dev/null)
@@ -156,7 +156,7 @@ restart_tunnel() {
     if [ "$(echo "$pids" | wc -l)" -gt 1 ]; then
         newest=$(echo "$pids" | tail -1)
         for p in $pids; do [ "$p" != "$newest" ] || continue; kill -9 "$p" 2>/dev/null || true; done
-        logger -t vpnplus-argo "启动后发现多实例，已只保留最新 PID $newest（防 cron/keepalive 竞态）"
+        logger -t vpnmax-argo "启动后发现多实例，已只保留最新 PID $newest（防 cron/keepalive 竞态）"
     fi
 }
 
@@ -181,7 +181,7 @@ flapping() {
     printf '%s|%s\n' "$now" "$cnt" > "$STATE"
     if [ "$cnt" -ge "$MAX_FLAP" ]; then
         touch /etc/s-box/argo-flapping.marker
-        logger -t vpnplus-argo "Argo 30分钟内连续重连 ${cnt} 次，疑似边缘持续不可达；进入 ${COOLDOWN}s 冷却"
+        logger -t vpnmax-argo "Argo 30分钟内连续重连 ${cnt} 次，疑似边缘持续不可达；进入 ${COOLDOWN}s 冷却"
         return 1
     fi
     return 0
@@ -190,7 +190,7 @@ flapping() {
 # 若上次翻动仍在冷却期内，直接退出（不空转重启）
 if [ -f /etc/s-box/argo-flapping.marker ]; then
     if [ $(( $(date +%s) - $(stat -c %Y /etc/s-box/argo-flapping.marker 2>/dev/null || echo 0) )) -lt "${COOLDOWN}" ]; then
-        logger -t vpnplus-argo "Argo 冷却期内，跳过本轮"
+        logger -t vpnmax-argo "Argo 冷却期内，跳过本轮"
         exit 0
     fi
     rm -f /etc/s-box/argo-flapping.marker
@@ -203,7 +203,7 @@ if ! tunnel_alive; then
     restart_tunnel
     sleep 15
     NEW_URL=$(get_url)
-    if [ -n "$NEW_URL" ]; then refresh_sub; logger -t vpnplus-argo "L1进程缺失已重启, 域名 $OLD_URL -> $NEW_URL, 订阅已同步"; fi
+    if [ -n "$NEW_URL" ]; then refresh_sub; logger -t vpnmax-argo "L1进程缺失已重启, 域名 $OLD_URL -> $NEW_URL, 订阅已同步"; fi
     exit 0
 fi
 
@@ -212,7 +212,7 @@ CUR_URL=$(get_url)
 if [ -z "$CUR_URL" ]; then
     restart_tunnel; sleep 15
     NEW_URL=$(get_url)
-    [ -n "$NEW_URL" ] && { refresh_sub; logger -t vpnplus-argo "L2无域名记录已重启, 新域名 $NEW_URL"; }
+    [ -n "$NEW_URL" ] && { refresh_sub; logger -t vpnmax-argo "L2无域名记录已重启, 新域名 $NEW_URL"; }
     exit 0
 fi
 HTTP=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 6 --max-time 12 "$CUR_URL" 2>/dev/null || echo 000)
@@ -222,7 +222,7 @@ if [ "$HTTP" = "000" ]; then
     HTTP2=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 6 --max-time 12 "$CUR_URL" 2>/dev/null || echo 000)
     if [ "$HTTP2" = "000" ]; then
         if flapping; then
-            logger -t vpnplus-argo "Argo 频繁重连已触发冷却，跳过本次重启（防域名无限漂移）"
+            logger -t vpnmax-argo "Argo 频繁重连已触发冷却，跳过本次重启（防域名无限漂移）"
             exit 0
         fi
         restart_tunnel
@@ -230,9 +230,9 @@ if [ "$HTTP" = "000" ]; then
         NEW_URL=$(get_url)
         if [ -n "$NEW_URL" ] && [ "$NEW_URL" != "$CUR_URL" ]; then
             refresh_sub
-            logger -t vpnplus-argo "L2隧道僵死(HTTP 000x2)已重连换域名 $CUR_URL -> $NEW_URL, 订阅已同步"
+            logger -t vpnmax-argo "L2隧道僵死(HTTP 000x2)已重连换域名 $CUR_URL -> $NEW_URL, 订阅已同步"
         elif [ -n "$NEW_URL" ]; then
-            logger -t vpnplus-argo 'L2隧道僵死已重连(域名未变)'
+            logger -t vpnmax-argo 'L2隧道僵死已重连(域名未变)'
         fi
         exit 0
     fi
@@ -260,18 +260,18 @@ if [ -n "$OLD_URL" ]; then
             fi
         done
         if [ "$still_old" = 1 ]; then
-            logger -t vpnplus-argo "L3补同步后订阅仍与运行域名 $OLD_DOM 不一致，sb 菜单可能已漂移，需手动: sb → 9 → 1"
+            logger -t vpnmax-argo "L3补同步后订阅仍与运行域名 $OLD_DOM 不一致，sb 菜单可能已漂移，需手动: sb → 9 → 1"
         else
-            logger -t vpnplus-argo "L3订阅与运行域名不一致, 已补同步"
+            logger -t vpnmax-argo "L3订阅与运行域名不一致, 已补同步"
         fi
     fi
 fi
 exit 0
 KEEP
-        chmod +x /usr/local/sbin/vpnplus-argo-keepalive.sh
+        chmod +x /usr/local/sbin/vpnmax-argo-keepalive.sh
         (
-            crontab -l 2>/dev/null | grep -vE 'vpnplus-argo-keepalive|acvn-argo-keepalive|acvpn-argo-keepalive'
-            echo '*/3 * * * * /usr/local/sbin/vpnplus-argo-keepalive.sh > /dev/null 2>&1'
+            crontab -l 2>/dev/null | grep -vE 'vpnmax-argo-keepalive|vpnplus-argo-keepalive|acvpn-argo-keepalive|acvn-argo-keepalive'
+            echo '*/3 * * * * /usr/local/sbin/vpnmax-argo-keepalive.sh > /dev/null 2>&1'
         ) | crontab - 2>/dev/null || true
     fi
     ok "Argo 保活 v3 已安装（每 3 分钟：flock互斥 + 进程/HTTP 双检 + 僵死重连换域名同步订阅 + 翻动冷却）"

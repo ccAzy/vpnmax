@@ -3,8 +3,8 @@
 # lib/time.sh — 时间同步（chrony 国内源），供 deploy_* 与 verify 共用
 
 # shellcheck disable=SC1091
-[ -n "${VPNPLUS_TIME_LOADED:-}" ] && return 0
-VPNPLUS_TIME_LOADED=1
+[ -n "${VPNMAX_TIME_LOADED:-}" ] && return 0
+VPNMAX_TIME_LOADED=1
 
 # 依赖 lib/common.sh 的 info/ok/warn/manifest/run
 ensure_time_sync() {

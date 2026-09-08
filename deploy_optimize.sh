@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-only
 # ===================================================================
-# vpnplus — 服务器暴力优化脚本（BBRv3 + 网络极限压榨）
+# vpnmax — 服务器暴力优化脚本（BBRv3 + 网络极限压榨）
 # 幂等设计：已优化过的服务器再次运行会自动跳过，不会重复重启
 #
 # 相对旧版 ACVPN 的关键改进：
@@ -10,11 +10,11 @@
 #   2. 内核下载地址锁定到明确的 release tag（可配置 VERSION_PIN），
 #      不做"API 动态取最新"的不确定性拼接；未锁定版本则强制校验。
 #   3. 所有命令替换统一 || true 防 set -e 静默退出。
-#   4. 全程写部署清单 /var/log/vpnplus-optimize-manifest.log（来源/版本/校验值）。
+#   4. 全程写部署清单 /var/log/vpnmax-optimize-manifest.log（来源/版本/校验值）。
 #   5. 支持 --dry-run 预览 + --no-reboot。
 #
 # 用法: bash deploy_optimize.sh [--no-reboot] [--dry-run] [VERSION_PIN=x.y.z]
-# 强制重跑: rm -f /etc/.vpnplus-optimized && bash deploy_optimize.sh
+# 强制重跑: rm -f /etc/.vpnmax-optimized && bash deploy_optimize.sh
 # ===================================================================
 set -euo pipefail
 
@@ -25,8 +25,8 @@ for _lib in common time optimize; do
         source "$SCRIPT_DIR/lib/${_lib}.sh"
     elif [ -f "lib/${_lib}.sh" ]; then
         source "lib/${_lib}.sh"
-    elif [ -f "/usr/local/lib/vpnplus/${_lib}.sh" ]; then
-        source "/usr/local/lib/vpnplus/${_lib}.sh"
+    elif [ -f "/usr/local/lib/vpnmax/${_lib}.sh" ]; then
+        source "/usr/local/lib/vpnmax/${_lib}.sh"
     fi
 done
 
@@ -43,7 +43,7 @@ for arg in "$@"; do
     VERSION_PIN=*) VERSION_PIN="${arg#VERSION_PIN=}" ;;
     --help | -h)
         cat <<'HELP'
-vpnplus deploy_optimize.sh — 服务器暴力优化（BBRv3 + 网络极限压榨）
+vpnmax deploy_optimize.sh — 服务器暴力优化（BBRv3 + 网络极限压榨）
 用法: bash deploy_optimize.sh [--no-reboot] [--dry-run] [--force] [VERSION_PIN=x.y.z]
   --no-reboot            完成优化后不自动重启（手动 reboot 生效）
   --dry-run              只打印将执行的动作，不实际修改系统
@@ -55,12 +55,12 @@ HELP
     esac
 done
 
-MANIFEST="/var/log/vpnplus-optimize-manifest.log"
-MARK="/etc/.vpnplus-optimized"
+MANIFEST="/var/log/vpnmax-optimize-manifest.log"
+MARK="/etc/.vpnmax-optimized"
 
 # ── 日志落盘 ──
 if [ -w /var/log ] && [ -d /var/log ]; then
-    LOG_FILE="/var/log/vpnplus-optimize.log"
+    LOG_FILE="/var/log/vpnmax-optimize.log"
     : >"$LOG_FILE" 2>/dev/null || true
     exec > >(tee -a "$LOG_FILE") 2>&1 || true
 fi
@@ -73,7 +73,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-UA="User-Agent: vpnplus-deploy"
+UA="User-Agent: vpnmax-deploy"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -140,6 +140,8 @@ case "$ARCH" in x86_64) DEB_ARCH="amd64" ;; aarch64) DEB_ARCH="arm64" ;; *) DEB_
 CUR_KERNEL=$(uname -r)
 
 # ── 幂等检测（提前执行，无需联网/装依赖） ──
+# 品牌切割：先接管旧 vpnplus 资产，再做新旧标记判断
+if declare -F migrate_legacy_units >/dev/null 2>&1; then migrate_legacy_units || true; fi
 if $FORCE; then
     info "--force 已启用，强制重跑全流程"
     rm -f "$MARK" 2>/dev/null || true
@@ -392,7 +394,7 @@ if ! declare -F clean_stale_acvpn_sysctl >/dev/null 2>&1; then
     # G3回退副本（与 lib/optimize.sh 同逻辑）：部署路径清旧 ACVPN 残留
     clean_stale_acvpn_sysctl() {
         local _acf _bd
-        _bd="/var/backups/vpnplus/stale-acvpn-$(date +%Y%m%d)"
+        _bd="/var/backups/vpnmax/stale-acvpn-$(date +%Y%m%d)"
         for _acf in /etc/sysctl.d/99-acvpn.conf /etc/sysctl.d/99-ACVPN-security.conf /etc/sysctl.d/99-ACVPN-brutal.conf; do
             if [ -f "$_acf" ]; then
                 mkdir -p "$_bd" 2>/dev/null || true
@@ -443,9 +445,9 @@ if ! declare -F apply_sysctl >/dev/null 2>&1; then
             fi
         fi
 
-        local conf="/etc/sysctl.d/99-vpnplus-brutal.conf"
+        local conf="/etc/sysctl.d/99-vpnmax-brutal.conf"
         run bash -c "cat > '$conf' <<'SYS'
-# vpnplus 网络优化（按内存分级，防 OOM；tcp_mem 单位为内存页）
+# vpnmax 网络优化（按内存分级，防 OOM；tcp_mem 单位为内存页）
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 net.core.rmem_max = $RMEM
@@ -525,7 +527,7 @@ if ! declare -F apply_qdisc >/dev/null 2>&1; then
 fi
 if ! declare -F boost_limits >/dev/null 2>&1; then
     boost_limits() {
-        run bash -c "cat > /etc/security/limits.d/99-vpnplus.conf <<'LIMITS'
+        run bash -c "cat > /etc/security/limits.d/99-vpnmax.conf <<'LIMITS'
 * soft nofile 1048576
 * hard nofile 1048576
 * soft nproc 655360
@@ -541,13 +543,13 @@ fi
 if ! declare -F apply_rss >/dev/null 2>&1; then
     apply_rss() {
         # 多队列网络调优：所有 RX/TX 队列的 RPS/XPS + ethtool + fq 持久化。
-        run bash -c "cat > /usr/local/sbin/vpnplus-net-tuning.sh <<'TUNE'
+        run bash -c "cat > /usr/local/sbin/vpnmax-net-tuning.sh <<'TUNE'
 #!/bin/bash
 set -u
 
 iface=\$(ip route 2>/dev/null | awk '/default/ {print \$5; exit}')
-[ -n \"\$iface\" ] || { echo '[vpnplus-net-tuning] no default interface' >&2; exit 1; }
-[ -d \"/sys/class/net/\$iface\" ] || { echo \"[vpnplus-net-tuning] interface not found: \$iface\" >&2; exit 1; }
+[ -n \"\$iface\" ] || { echo '[vpnmax-net-tuning] no default interface' >&2; exit 1; }
+[ -d \"/sys/class/net/\$iface\" ] || { echo \"[vpnmax-net-tuning] interface not found: \$iface\" >&2; exit 1; }
 
 cores=\$(nproc 2>/dev/null || echo 1)
 if [ \"\$cores\" -ge 64 ]; then
@@ -582,26 +584,26 @@ tc qdisc replace dev \"\$iface\" root fq 2>/dev/null || true
 if [ \"\$rx_count\" -gt 0 ]; then
     sysctl -w net.core.rps_sock_flow_entries=\$((rx_count * rps_flow)) >/dev/null 2>&1 || true
 fi
-echo \"[vpnplus-net-tuning] applied iface=\$iface cores=\$cores rx_queues=\$rx_count mask=\$cpu_mask\"
+echo \"[vpnmax-net-tuning] applied iface=\$iface cores=\$cores rx_queues=\$rx_count mask=\$cpu_mask\"
 TUNE
-chmod +x /usr/local/sbin/vpnplus-net-tuning.sh
-cat > /etc/systemd/system/vpnplus-net-tuning.service <<'UNIT'
+chmod +x /usr/local/sbin/vpnmax-net-tuning.sh
+cat > /etc/systemd/system/vpnmax-net-tuning.service <<'UNIT'
 [Unit]
-Description=vpnplus persistent network tuning
+Description=vpnmax persistent network tuning
 After=network-online.target
 Wants=network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/local/sbin/vpnplus-net-tuning.sh
+ExecStart=/usr/local/sbin/vpnmax-net-tuning.sh
 [Install]
 WantedBy=multi-user.target
 UNIT"
         run systemctl daemon-reload || true
-        if ! run systemctl enable --now vpnplus-net-tuning.service; then
+        if ! run systemctl enable --now vpnmax-net-tuning.service; then
             warn "网络调优 systemd 服务启用失败，重启后可能不会自动恢复网卡参数"
         fi
-        ok "多队列 RPS/XPS、ethtool、fq 已配置并持久化 (vpnplus-net-tuning.service)"
+        ok "多队列 RPS/XPS、ethtool、fq 已配置并持久化 (vpnmax-net-tuning.service)"
     }
 fi
 # ── GRUB 默认内核校验（防重启后进旧内核） ──
@@ -656,7 +658,7 @@ logo() { :; }
 # check_env/install_dependencies 已在依赖阶段完成，这里不重复执行。
 
 step "1" "清理旧安装"
-if [ -f /etc/.vpnplus-singbox ]; then
+if [ -f /etc/.vpnmax-singbox ]; then
     info "检测到 sing-box 已部署，跳过旧安装清理（保留 /etc/s-box）"
 elif [ -f "$MARK" ]; then
     warn "检测到优化标记，跳过清理"

@@ -1,10 +1,10 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-only
 # ===================================================================
-# vpnplus — 部署后验证脚本
+# vpnmax — 部署后验证脚本
 # 检查 sing-box 进程、端口、独立防火墙链、Argo 隧道、订阅链接、域名分流
 #
-# 与旧版差异：验证独立命名链（ACVPN_PORTHOP / ACVPN_ANTIPROBE）是否存在，
+# 与旧版差异：验证独立命名链（VPNMAX_PORTHOP / VPNMAX_ANTIPROBE）是否存在，
 #   不再 grep 全局 INPUT/PREROUTING 规则（旧法易误判/误删第三方规则）。
 # 用法: bash verify.sh [SERVER_IP]
 # ===================================================================
@@ -34,8 +34,8 @@ info() { echo -e "${CYAN}[*]${N}   $*"; }
 
 PASS=0
 FAIL=0
-CHAIN_PORTHOP="ACVPN_PORTHOP"
-CHAIN_ANTIPROBE="ACVPN_ANTIPROBE"
+CHAIN_PORTHOP="VPNMAX_PORTHOP"
+CHAIN_ANTIPROBE="VPNMAX_ANTIPROBE"
 check() {
     local desc="$1"
     shift
@@ -52,7 +52,7 @@ check() {
 
 echo ""
 echo "========================================="
-echo "  vpnplus 部署验证"
+echo "  vpnmax 部署验证"
 echo "========================================="
 echo ""
 
@@ -95,31 +95,31 @@ if [ -n "$IFACE" ] && command -v tc >/dev/null 2>&1; then
         warn "默认网卡未检测到 fq 队列调度"
     fi
 fi
-if systemctl is-active --quiet vpnplus-net-tuning.service 2>/dev/null; then
+if systemctl is-active --quiet vpnmax-net-tuning.service 2>/dev/null; then
     ok "持久化网络调优服务运行中"
     PASS=$((PASS + 1))
-    systemctl is-enabled --quiet vpnplus-net-tuning.service 2>/dev/null && ok "网络调优服务已启用(开机自启)" || warn "网络调优服务未 enable"
+    systemctl is-enabled --quiet vpnmax-net-tuning.service 2>/dev/null && ok "网络调优服务已启用(开机自启)" || warn "网络调优服务未 enable"
 else
     warn "持久化网络调优服务未运行（可能尚未执行 deploy_optimize.sh）"
 fi
 
-# 防火墙持久化恢复单元（#2026-08-25：防重启后 ACVPN_* 链丢失）
-if [ -f /etc/systemd/system/vpnplus-netfilter-restore.service ]; then
-    ok "vpnplus-netfilter-restore.service 存在"
+# 防火墙持久化恢复单元（#2026-08-25：防重启后 VPNMAX_* 链丢失）
+if [ -f /etc/systemd/system/vpnmax-netfilter-restore.service ]; then
+    ok "vpnmax-netfilter-restore.service 存在"
     PASS=$((PASS + 1))
-    systemctl is-enabled --quiet vpnplus-netfilter-restore.service 2>/dev/null && ok "防火墙恢复单元已启用" || warn "防火墙恢复单元未 enable"
+    systemctl is-enabled --quiet vpnmax-netfilter-restore.service 2>/dev/null && ok "防火墙恢复单元已启用" || warn "防火墙恢复单元未 enable"
 else
-    warn "未检测到 vpnplus-netfilter-restore.service（重启后端口跳跃/防探测规则可能不自动恢复）"
+    warn "未检测到 vpnmax-netfilter-restore.service（重启后端口跳跃/防探测规则可能不自动恢复）"
 fi
 # 日志轮转配置
-if [ -f /etc/logrotate.d/vpnplus ]; then
+if [ -f /etc/logrotate.d/vpnmax ]; then
     ok "日志轮转配置存在"
     PASS=$((PASS + 1))
 else warn "未检测到 logrotate 配置"; fi
 
 # 1a. sing-box 1.12+ legacy 环境变量（2026-08-27 JP/HK 崩溃根因）
 echo "--- sing-box 兼容 ---"
-if grep -q "ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS" /etc/systemd/system/sing-box.service.d/99-vpnplus.conf 2>/dev/null; then
+if grep -q "ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS" /etc/systemd/system/sing-box.service.d/99-vpnmax.conf 2>/dev/null; then
     ok "sing-box legacy env 已注入"
     PASS=$((PASS + 1))
 else warn "sing-box legacy env 缺失（1.12+ 会 FATAL 崩溃，需 ensure_singbox_legacy_env）"; fi
@@ -207,6 +207,20 @@ if [ -n "$_RUN_DOM" ]; then
         PASS=$((PASS + 1))
     }
 else warn "G7: argo.log 无运行域名，隧道可能未启动"; fi
+# 品牌切割回归：旧 vpnplus/ACVPN 资产应已被迁移，无残留
+_MIG_OK=true
+for _mf in /etc/systemd/system/vpnplus-net-tuning.service /etc/systemd/system/vpnplus-netfilter-restore.service /usr/local/sbin/vpnplus-argo-keepalive.sh /etc/logrotate.d/vpnplus /etc/systemd/system/sing-box.service.d/99-vpnplus.conf /etc/.vpnplus-optimized /etc/.vpnplus-singbox; do
+    if [ -e "$_mf" ]; then warn "迁移残留: $_mf 仍存在（重跑 deploy 即接管清理）"; _MIG_OK=false; fi
+done
+for _mc in ACVPN_PORTHOP ACVPN_ANTIPROBE ACVPN_RSS; do
+    if iptables -L "$_mc" -n >/dev/null 2>&1 || iptables -t nat -L "$_mc" -n >/dev/null 2>&1; then
+        warn "迁移残留: 旧链 $_mc 仍存在（重跑 deploy 即拆除）"; _MIG_OK=false
+    fi
+done
+$_MIG_OK && {
+    ok "品牌切割无残留（旧 units/链/marker 已接管）"
+    PASS=$((PASS + 1))
+}
 
 # 1b. 时间同步（P0：Reality/VMess 握手对时，漂移>90s 全不通，但端口照常通）
 if declare -F verify_time >/dev/null 2>&1; then verify_time; else
@@ -257,20 +271,20 @@ if ss -ulnp 2>/dev/null | grep -q sing-box; then
     PASS=$((PASS + 1))
 else warn "未检测到 UDP 端口"; fi
 
-# 独立命名链存在性（vpnplus 防火墙设计核心）
+# 独立命名链存在性（vpnmax 防火墙设计核心）
 if iptables -t nat -L "$CHAIN_PORTHOP" -n >/dev/null 2>&1; then
-    ok "端口跳跃链 ${CHAIN_PORTHOP:-ACVPN_PORTHOP} 存在"
+    ok "端口跳跃链 ${CHAIN_PORTHOP:-VPNMAX_PORTHOP} 存在"
     PASS=$((PASS + 1))
 else warn "端口跳跃链不存在（可能未配置端口跳跃）"; fi
 # PREROUTING 是否残留指向过期端口的孤立跳跃段规则（会导致 hy2/tuic 端口跳跃握手无响应）
 # 注意：40000:42000 / 43000:45000 与 deploy_singbox.sh 顶部的 HOP_HY_RANGE / HOP_TU_RANGE 保持同步
-HOP_LEAK=$(iptables -t nat -L PREROUTING -n --line-numbers 2>/dev/null | grep -E "DNAT|REDIRECT" | grep -E "40000:42000|43000:45000" | grep -v "ACVPN_PORTHOP" | head -1 || true)
+HOP_LEAK=$(iptables -t nat -L PREROUTING -n --line-numbers 2>/dev/null | grep -E "DNAT|REDIRECT" | grep -E "40000:42000|43000:45000" | grep -v "VPNMAX_PORTHOP" | head -1 || true)
 if [ -n "$HOP_LEAK" ]; then warn "检测到 PREROUTING 残留过期端口跳跃规则: $HOP_LEAK（重跑 deploy_singbox.sh 会自动清理）"; else
     ok "PREROUTING 无残留端口跳跃段"
     PASS=$((PASS + 1))
 fi
 if iptables -L "$CHAIN_ANTIPROBE" -n >/dev/null 2>&1; then
-    ok "防探测链 ${CHAIN_ANTIPROBE:-ACVPN_ANTIPROBE} 存在"
+    ok "防探测链 ${CHAIN_ANTIPROBE:-VPNMAX_ANTIPROBE} 存在"
     PASS=$((PASS + 1))
 else warn "防探测链不存在"; fi
 
@@ -291,10 +305,10 @@ if declare -F verify_tuic >/dev/null 2>&1; then verify_tuic; else
         _tuic_uuid=$(jq -r '.inbounds[] | select(.type=="tuic") | .users[0].uuid' /etc/s-box/sb.json 2>/dev/null || true)
         if [ -n "$_tuic_uuid" ] && [ "$_tuic_uuid" != "null" ]; then
             _vport=$(shuf -i 18080-19090 -n1 2>/dev/null || echo 18081)
-            cat >/tmp/vpnplus-verify-tuic.json <<JSON_TMP
+            cat >/tmp/vpnmax-verify-tuic.json <<JSON_TMP
 {"log":{"level":"error"},"inbounds":[{"type":"socks","listen":"127.0.0.1","listen_port":$_vport}],"outbounds":[{"type":"tuic","server":"127.0.0.1","server_port":$TU_PORT,"uuid":"$_tuic_uuid","password":"$_tuic_uuid","congestion_control":"bbr","tls":{"enabled":true,"server_name":"www.bing.com","insecure":true,"alpn":["h3"]}}]}
 JSON_TMP
-            timeout 4 /etc/s-box/sing-box run -c /tmp/vpnplus-verify-tuic.json >/tmp/vpnplus-verify-tuic.log 2>&1 &
+            timeout 4 /etc/s-box/sing-box run -c /tmp/vpnmax-verify-tuic.json >/tmp/vpnmax-verify-tuic.log 2>&1 &
             _vpid=$!
             sleep 2
             if curl -s -o /dev/null -w '%{http_code}' --socks5-hostname 127.0.0.1:"$_vport" --connect-timeout 4 --max-time 6 https://www.google.com/generate_204 2>/dev/null | grep -q '204'; then
@@ -302,7 +316,7 @@ JSON_TMP
                 PASS=$((PASS + 1))
             else warn "TUIC 本地回环不通（本机 sing-box 或证书异常，非外网墙）"; fi
             kill -9 $_vpid 2>/dev/null || true
-            rm -f /tmp/vpnplus-verify-tuic.json /tmp/vpnplus-verify-tuic.log 2>/dev/null || true
+            rm -f /tmp/vpnmax-verify-tuic.json /tmp/vpnmax-verify-tuic.log 2>/dev/null || true
         fi
     fi
 fi
@@ -369,10 +383,10 @@ else
 fi
 
 # Argo 自愈保活（v3）：脚本存在 + cron 每 3 分钟 + flock 依赖可用
-if [ -x /usr/local/sbin/vpnplus-argo-keepalive.sh ]; then
+if [ -x /usr/local/sbin/vpnmax-argo-keepalive.sh ]; then
     ok "Argo 保活脚本存在"
     PASS=$((PASS + 1))
-    if crontab -l 2>/dev/null | grep -q 'vpnplus-argo-keepalive'; then
+    if crontab -l 2>/dev/null | grep -q 'vpnmax-argo-keepalive'; then
         ok "保活 cron 已注册(每3分钟)"
         PASS=$((PASS + 1))
     else warn "保活 cron 未注册"; fi

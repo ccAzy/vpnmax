@@ -1,7 +1,7 @@
 #!/bin/bash
 # lib/verify/time.sh — verify 侧时间检查
-[ -n "${VPNPLUS_VERIFY_TIME_LOADED:-}" ] && return 0
-VPNPLUS_VERIFY_TIME_LOADED=1
+[ -n "${VPNMAX_VERIFY_TIME_LOADED:-}" ] && return 0
+VPNMAX_VERIFY_TIME_LOADED=1
 
 verify_time() {
     echo "--- 时间同步 ---"

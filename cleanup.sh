@@ -1,16 +1,16 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-only
 # ===================================================================
-# vpnplus — sing-box 彻底清理脚本
+# vpnmax — sing-box 彻底清理脚本
 # 清除 sing-box / cloudflared(argo) / busybox / crontab / iptables(仅ACVPN链) / nftables
 # 保留 /opt/cloudflared 等永久隧道文件不受影响
 #
 # 安全设计（相对旧版 ACVPN 的关键改进）：
-#   1. 只清理 vpnplus 自己创建的独立防火墙链（ACVPN_*），
+#   1. 只清理 vpnmax 自己创建的独立防火墙链（VPNMAX_*），
 #      绝不按 'limit: above'/'#conn' 等通用文本全局删 INPUT 链规则，
 #      避免误删 fail2ban / Docker / 其他程序的安全规则。
 #   2. crontab 清理用 '|| true' 包裹命令替换，杜绝 set -e 静默退出。
-#   3. 清理前自动备份原始 iptables/nftables 规则到 /var/backups/vpnplus/。
+#   3. 清理前自动备份原始 iptables/nftables 规则到 /var/backups/vpnmax/。
 #   4. 清理后逐项自检，任一失败明确列出修复命令。
 #
 # 用法: bash cleanup.sh [--force] [--dry-run]
@@ -36,10 +36,10 @@ for arg in "$@"; do
     esac
 done
 
-BAK_DIR="/var/backups/vpnplus"
-CHAIN_ANTIPROBE="ACVPN_ANTIPROBE" # filter INPUT 子链
-CHAIN_PORTHOP="ACVPN_PORTHOP"     # nat PREROUTING 子链
-CHAIN_RSS="ACVPN_RSS"             # filter INPUT 子链（RSS 若曾加过）
+BAK_DIR="/var/backups/vpnmax"
+CHAIN_ANTIPROBE="VPNMAX_ANTIPROBE" # filter INPUT 子链
+CHAIN_PORTHOP="VPNMAX_PORTHOP"     # nat PREROUTING 子链
+CHAIN_RSS="VPNMAX_RSS"             # filter INPUT 子链（RSS 若曾加过）
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -65,7 +65,7 @@ run() {
 
 echo ""
 echo "========================================="
-echo "  vpnplus sing-box 清理"
+echo "  vpnmax sing-box 清理"
 echo "========================================="
 echo ""
 
@@ -96,12 +96,12 @@ if ! declare -F bak_firewall >/dev/null 2>&1; then
     }
 fi
 
-# ———————— 仅删除 vpnplus 自己的独立链（不碰第三方规则） ————————
-# 关键改进：不 grep INPUT 链全局匹配删除，只处理 ACVPN_* 命名链。
+# ———————— 仅删除 vpnmax 自己的独立链（不碰第三方规则） ————————
+# 关键改进：不 grep INPUT 链全局匹配删除，只处理 VPNMAX_* 命名链。
 if ! declare -F clean_chains >/dev/null 2>&1; then
     clean_chains() {
-        echo "--- 清理 vpnplus 独立防火墙链 ---"
-        # 1) 先从主链移除 vpnplus 的跳转规则（精确匹配 jump 到命名链，绝不误伤其他规则）
+        echo "--- 清理 vpnmax 独立防火墙链 ---"
+        # 1) 先从主链移除 vpnmax 的跳转规则（精确匹配 jump 到命名链，绝不误伤其他规则）
         run iptables -D INPUT -j "$CHAIN_ANTIPROBE" 2>/dev/null
         run iptables -D INPUT -j "$CHAIN_RSS" 2>/dev/null
         run iptables -t nat -D PREROUTING -j "$CHAIN_PORTHOP" 2>/dev/null
@@ -126,7 +126,7 @@ if ! declare -F clean_chains >/dev/null 2>&1; then
         fi
 
         # 3) 兜底：若旧版遗留了分散的 nat 端口跳跃规则（40000:42000/43000:45000）也精确按目标端口清理，
-        #    但仅匹配 vpnplus/ACVPN 特有的端口范围 DNAT/REDIRECT，依旧不动其他规则。
+        #    但仅匹配 vpnmax/ACVPN 特有的端口范围 DNAT/REDIRECT，依旧不动其他规则。
         #    （2026-08-24 HK 实测：sing-box 旧配置还会留下 REDIRECT 40000:41000 型重复规则，同样会截胡跳跃段流量）
         #    注意：grep 无匹配 rc=1，在 set -e + pipefail 下会直接杀掉脚本（2026-08-27 HK 实测 dry-run 中断于此），
         #    整段用 || true 兜底：无匹配=无需清理，属正常路径而非错误
@@ -145,7 +145,7 @@ fi
 # （与 ACVPN 相同，但 crontab 处理修复了 set -e 退出问题）
 stop_services() {
     echo "--- 停止服务 ---"
-    for svc in sing-box cloudflared cloudflared-update acvpn-rss vpnplus-net-tuning; do
+    for svc in sing-box cloudflared cloudflared-update vpnmax-rss vpnmax-net-tuning; do
         if systemctl is-active "$svc" &>/dev/null; then
             run systemctl stop "$svc" || true
             ok "已停止服务: $svc"
@@ -175,7 +175,7 @@ kill_procs() {
     done
 }
 
-# 精确停止 vpnplus 订阅端口对应的 busybox httpd，不按进程名全局杀进程。
+# 精确停止 vpnmax 订阅端口对应的 busybox httpd，不按进程名全局杀进程。
 kill_sub_httpd() {
     local port pids
     [ -f /etc/s-box/subport.log ] || return 0
@@ -185,17 +185,17 @@ kill_sub_httpd() {
     for p in $pids; do
         if tr '\0' ' ' <"/proc/$p/cmdline" 2>/dev/null | grep -qE 'busybox[[:space:]]+httpd.*(/root/websbox|subport.log)'; then
             run kill -TERM "$p" || true
-            ok "已终止 vpnplus 订阅 httpd (PID $p, 端口 $port)"
+            ok "已终止 vpnmax 订阅 httpd (PID $p, 端口 $port)"
         fi
     done
 }
 
 clean_crontab() {
-    echo "--- 清理 crontab（仅 vpnplus 自己的条目和明确的旧 ACVPN 兼容条目） ---"
+    echo "--- 清理 crontab（仅 vpnmax 自己的条目和明确的旧 ACVPN 兼容条目） ---"
     if crontab -l &>/dev/null; then
         BEFORE=$(crontab -l 2>/dev/null | wc -l)
         # 修复 set -e 问题：grep 无匹配时返回 1，必须 || true 防静默退出
-        NEW_CRON=$(crontab -l 2>/dev/null | grep -vE 'vpnplus-argo-keepalive|acvpn-argo-keepalive|/usr/bin/sb|busybox httpd.*(/root/websbox|subport.log)' || true)
+        NEW_CRON=$(crontab -l 2>/dev/null | grep -vE 'vpnmax-argo-keepalive|vpnplus-argo-keepalive|acvpn-argo-keepalive|acvn-argo-keepalive|/usr/bin/sb|busybox httpd.*(/root/websbox|subport.log)' || true)
         if $DRY_RUN; then
             info "[dry-run] 过滤 crontab（移除 ${BEFORE} 行中的 sb 相关条目）"
         elif [ -z "$NEW_CRON" ]; then
@@ -224,12 +224,15 @@ rm_units() {
         /etc/systemd/system/cloudflared.service \
         /etc/systemd/system/cloudflared-update.service \
         /etc/systemd/system/cloudflared-update.timer \
-        /etc/systemd/system/acvpn-rss.service \
+        /etc/systemd/system/vpnmax-rss.service \
+        /etc/systemd/system/vpnplus-rss.service \
+        /etc/systemd/system/vpnmax-net-tuning.service \
         /etc/systemd/system/vpnplus-net-tuning.service \
+        /etc/systemd/system/vpnmax-netfilter-restore.service \
         /etc/systemd/system/vpnplus-netfilter-restore.service; do
         if [ -e "$unit" ]; then
-            # 只删除明确属于 vpnplus/旧 ACVPN 的 unit；不因同名而删除其他 cloudflared 服务。
-            if [ "$(basename "$unit")" = "acvpn-rss.service" ] || [ "$(basename "$unit")" = "sb.service" ] || [ "$(basename "$unit")" = "xr.service" ] || [ -d "$unit" ] || grep -qE '/etc/s-box|/root/websbox|vpnplus|ACVPN|ENABLE_DEPRECATED' "$unit" 2>/dev/null; then
+            # 只删除明确属于 vpnmax/旧 ACVPN 的 unit；不因同名而删除其他 cloudflared 服务。
+            if [ "$(basename "$unit")" = "vpnmax-rss.service" ] || [ "$(basename "$unit")" = "vpnplus-rss.service" ] || [ "$(basename "$unit")" = "sb.service" ] || [ "$(basename "$unit")" = "xr.service" ] || [ -d "$unit" ] || grep -qE '/etc/s-box|/root/websbox|vpnmax|ACVPN|ENABLE_DEPRECATED' "$unit" 2>/dev/null; then
                 run rm -rf "$unit"
                 COUNT=$((COUNT + 1))
             else
@@ -238,22 +241,29 @@ rm_units() {
         fi
     done
     run systemctl daemon-reload || true
-    [ $COUNT -gt 0 ] && ok "已删除 ${COUNT} 个 vpnplus/sb systemd unit 文件" || info "无 vpnplus unit 文件需清理"
+    [ $COUNT -gt 0 ] && ok "已删除 ${COUNT} 个 vpnmax/sb systemd unit 文件" || info "无 vpnmax unit 文件需清理"
 }
 
 rm_files() {
     echo "--- 清理文件和目录 ---"
     local COUNT=0
     for path in /etc/s-box /usr/bin/sb /root/websbox \
-        /usr/local/sbin/acvpn-argo-keepalive.sh \
+        /usr/local/sbin/vpnmax-argo-keepalive.sh \
         /usr/local/sbin/vpnplus-argo-keepalive.sh \
+        /usr/local/sbin/vpnmax-net-tuning.sh \
         /usr/local/sbin/vpnplus-net-tuning.sh \
+        /var/lock/vpnmax-argo-keepalive.lock \
         /var/lock/vpnplus-argo-keepalive.lock \
         /etc/iptables/rules.v4 /etc/iptables/rules.v6 \
+        /etc/logrotate.d/vpnmax \
         /etc/logrotate.d/vpnplus \
+        /var/log/vpnmax-optimize.log \
         /var/log/vpnplus-optimize.log \
+        /var/log/vpnmax-optimize-manifest.log \
         /var/log/vpnplus-optimize-manifest.log \
+        /var/log/vpnmax-singbox-manifest.log \
         /var/log/vpnplus-singbox-manifest.log \
+        /var/log/vpnmax-sbfeed.log \
         /var/log/vpnplus-sbfeed.log; do
         if [ -e "$path" ]; then
             run rm -rf "$path"
@@ -261,7 +271,7 @@ rm_files() {
             ok "已删除: $path"
         fi
     done
-    for mark in /etc/.ACVPN-optimized /etc/.ACVPN-singbox /etc/.vpnplus-optimized /etc/.vpnplus-singbox; do
+    for mark in /etc/.ACVPN-optimized /etc/.ACVPN-singbox /etc/.vpnmax-optimized /etc/.vpnmax-singbox; do
         # 注意：[ -f ] && {...} 独立成句时，文件不存在=整句 rc=1，set -e 会杀脚本（2026-08-27 HK 实测），必须 || true
         if [ -f "$mark" ]; then
             run rm -f "$mark"
@@ -276,7 +286,7 @@ clean_sysctl() {
     echo "--- 清理系统已应用参数（不改动第三方配置） ---"
     # 我们只移除脚本文档明确自己写入的 sysctl.d 文件（若仍存在）
     for f in /etc/sysctl.d/99-ACVPN-security.conf /etc/sysctl.d/99-ACVPN-brutal.conf \
-        /etc/sysctl.d/99-vpnplus-security.conf /etc/sysctl.d/99-vpnplus-brutal.conf; do
+        /etc/sysctl.d/99-vpnmax-security.conf /etc/sysctl.d/99-vpnmax-brutal.conf; do
         # 同上：if 形式防 set -e 在文件不存在时杀脚本
         if [ -f "$f" ]; then
             run rm -f "$f"
@@ -287,13 +297,13 @@ clean_sysctl() {
 }
 
 clean_nft() {
-    echo "--- 清理 nftables（仅 vpnplus 表） ---"
+    echo "--- 清理 nftables（仅 vpnmax 表） ---"
     if command -v nft >/dev/null 2>&1; then
-        # 只有检测到 vpnplus/旧 ACVPN 的部署痕迹时才删除通用 sing-box 表，
+        # 只有检测到 vpnmax/旧 ACVPN 的部署痕迹时才删除通用 sing-box 表，
         # 避免清理另一套独立 sing-box 实例。
-        if [ -f /etc/.vpnplus-singbox ] || [ -f /etc/.ACVPN-singbox ] || [ -d /etc/s-box ]; then
+        if [ -f /etc/.vpnmax-singbox ] || [ -f /etc/.ACVPN-singbox ] || [ -d /etc/s-box ]; then
             run nft delete table inet sing-box 2>/dev/null
-            run nft delete table inet vpnplus 2>/dev/null
+            run nft delete table inet vpnmax 2>/dev/null
         else
             info "未确认 nftables sing-box 表归属，保留不动"
         fi
@@ -318,7 +328,7 @@ verify_clean() {
         warn "sing-box 服务仍存在"
         FAIL=$((FAIL + 1))
     fi
-    if [ ! -d /etc/systemd/system/sing-box.service.d ] && [ ! -f /etc/systemd/system/sing-box.service.d/99-vpnplus.conf ]; then
+    if [ ! -d /etc/systemd/system/sing-box.service.d ] && [ ! -f /etc/systemd/system/sing-box.service.d/99-vpnmax.conf ]; then
         ok "sing-box drop-in 已清除（无 legacy env 残留）"
         PASS=$((PASS + 1))
     else
@@ -332,11 +342,11 @@ verify_clean() {
         warn "/etc/s-box 仍存在"
         FAIL=$((FAIL + 1))
     }
-    if ! ls /var/log/vpnplus-*.log >/dev/null 2>&1; then
-        ok "vpnplus 日志已清除（无 IP/token 残留）"
+    if ! ls /var/log/vpnmax-*.log >/dev/null 2>&1; then
+        ok "vpnmax 日志已清除（无 IP/token 残留）"
         PASS=$((PASS + 1))
     else
-        warn "vpnplus 日志仍存在"
+        warn "vpnmax 日志仍存在"
         FAIL=$((FAIL + 1))
     fi
     if [ ! -f /etc/systemd/system/sb.service ] && [ ! -f /etc/systemd/system/xr.service ]; then
@@ -346,28 +356,28 @@ verify_clean() {
         warn "sb.service/xr.service 残留"
         FAIL=$((FAIL + 1))
     fi
-    [ ! -f /etc/systemd/system/vpnplus-netfilter-restore.service ] && {
-        ok "vpnplus-netfilter-restore.service 已删除"
+    [ ! -f /etc/systemd/system/vpnmax-netfilter-restore.service ] && [ ! -f /etc/systemd/system/vpnplus-netfilter-restore.service ] && {
+        ok "vpnmax-netfilter-restore.service 已删除"
         PASS=$((PASS + 1))
     } || {
-        warn "vpnplus-netfilter-restore.service 仍存在"
+        warn "vpnmax-netfilter-restore.service 仍存在"
         FAIL=$((FAIL + 1))
     }
-    [ ! -f /usr/local/sbin/vpnplus-argo-keepalive.sh ] && {
+    [ ! -f /usr/local/sbin/vpnmax-argo-keepalive.sh ] && [ ! -f /usr/local/sbin/vpnplus-argo-keepalive.sh ] && {
         ok "Argo 保活脚本已删除"
         PASS=$((PASS + 1))
     } || {
-        warn "vpnplus-argo-keepalive.sh 仍存在"
+        warn "vpnmax-argo-keepalive.sh 仍存在"
         FAIL=$((FAIL + 1))
     }
     if iptables -L "$CHAIN_ANTIPROBE" -n >/dev/null 2>&1 || iptables -t nat -L "$CHAIN_PORTHOP" -n >/dev/null 2>&1; then
-        warn "vpnplus 独立防火墙链仍存在"
+        warn "vpnmax 独立防火墙链仍存在"
         FAIL=$((FAIL + 1))
     else
-        ok "vpnplus 独立防火墙链已清除"
+        ok "vpnmax 独立防火墙链已清除"
         PASS=$((PASS + 1))
     fi
-    if crontab -l 2>/dev/null | grep -qE 'vpnplus-argo-keepalive|acvpn-argo-keepalive|/usr/bin/sb|busybox httpd.*(/root/websbox|subport.log)' 2>/dev/null; then
+    if crontab -l 2>/dev/null | grep -qE 'vpnmax-argo-keepalive|vpnplus-argo-keepalive|acvpn-argo-keepalive|/usr/bin/sb|busybox httpd.*(/root/websbox|subport.log)' 2>/dev/null; then
         warn "crontab 残留 sb 条目"
         FAIL=$((FAIL + 1))
     else

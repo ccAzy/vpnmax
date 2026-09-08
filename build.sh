@@ -12,7 +12,7 @@ inline_lib() {
     local lib="$1"
     echo "# --- lib/$lib ---"
     # 去掉 shebang 和 guard 的 return 0 行，保留实际代码
-    sed -e '1d' -e '/VPNPLUS.*LOADED/d' "lib/$lib" 2>/dev/null || cat "lib/$lib"
+    sed -e '1d' -e '/VPNMAX.*LOADED/d' "lib/$lib" 2>/dev/null || cat "lib/$lib"
     echo ""
 }
 

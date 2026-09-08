@@ -1,7 +1,7 @@
 #!/bin/bash
 # lib/optimize.sh — BBRv3 与网络极限优化
-[ -n "${VPNPLUS_OPTIMIZE_LOADED:-}" ] && return 0
-VPNPLUS_OPTIMIZE_LOADED=1
+[ -n "${VPNMAX_OPTIMIZE_LOADED:-}" ] && return 0
+VPNMAX_OPTIMIZE_LOADED=1
 
 install_bbrv3() {
     if echo "$CUR_KERNEL" | grep -q "bbrv3"; then
@@ -105,7 +105,7 @@ install_bbrv3() {
 
 apply_sysctl() {
     # G3修复：部署路径顺手清除旧 ACVPN 时代残留 sysctl（线上 cc/vn/qq2 实测残留）。
-    # vpnplus 的 security 文件是其超集，删旧不丢配置；先备份到 /var/backups/vpnplus/。
+    # vpnmax 的 security 文件是其超集，删旧不丢配置；先备份到 /var/backups/vpnmax/。
     clean_stale_acvpn_sysctl
 
     info "应用网络暴力优化..."
@@ -146,9 +146,9 @@ apply_sysctl() {
         fi
     fi
 
-    local conf="/etc/sysctl.d/99-vpnplus-brutal.conf"
+    local conf="/etc/sysctl.d/99-vpnmax-brutal.conf"
     run bash -c "cat > '$conf' <<'SYS'
-# vpnplus 网络优化（按内存分级，防 OOM；tcp_mem 单位为内存页）
+# vpnmax 网络优化（按内存分级，防 OOM；tcp_mem 单位为内存页）
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 net.core.rmem_max = $RMEM
@@ -193,7 +193,7 @@ SYS"
 # G3：清除旧 ACVPN 残留 sysctl（部署路径，不是清理路径——线上机只跑部署不跑清理）
 clean_stale_acvpn_sysctl() {
     local f bakdir
-    bakdir="/var/backups/vpnplus/stale-acvpn-$(date +%Y%m%d)"
+    bakdir="/var/backups/vpnmax/stale-acvpn-$(date +%Y%m%d)"
     for f in /etc/sysctl.d/99-acvpn.conf /etc/sysctl.d/99-ACVPN-security.conf /etc/sysctl.d/99-ACVPN-brutal.conf; do
         if [ -f "$f" ]; then
             run mkdir -p "$bakdir"
@@ -239,7 +239,7 @@ apply_qdisc() {
 }
 
 boost_limits() {
-    run bash -c "cat > /etc/security/limits.d/99-vpnplus.conf <<'LIMITS'
+    run bash -c "cat > /etc/security/limits.d/99-vpnmax.conf <<'LIMITS'
 * soft nofile 1048576
 * hard nofile 1048576
 * soft nproc 655360
@@ -254,13 +254,13 @@ LIMITS"
 
 apply_rss() {
     # 多队列网络调优：所有 RX/TX 队列的 RPS/XPS + ethtool + fq 持久化。
-    run bash -c "cat > /usr/local/sbin/vpnplus-net-tuning.sh <<'TUNE'
+    run bash -c "cat > /usr/local/sbin/vpnmax-net-tuning.sh <<'TUNE'
 #!/bin/bash
 set -u
 
 iface=\$(ip route 2>/dev/null | awk '/default/ {print \$5; exit}')
-[ -n \"\$iface\" ] || { echo '[vpnplus-net-tuning] no default interface' >&2; exit 1; }
-[ -d \"/sys/class/net/\$iface\" ] || { echo \"[vpnplus-net-tuning] interface not found: \$iface\" >&2; exit 1; }
+[ -n \"\$iface\" ] || { echo '[vpnmax-net-tuning] no default interface' >&2; exit 1; }
+[ -d \"/sys/class/net/\$iface\" ] || { echo \"[vpnmax-net-tuning] interface not found: \$iface\" >&2; exit 1; }
 
 cores=\$(nproc 2>/dev/null || echo 1)
 if [ \"\$cores\" -ge 64 ]; then
@@ -295,26 +295,26 @@ tc qdisc replace dev \"\$iface\" root fq 2>/dev/null || true
 if [ \"\$rx_count\" -gt 0 ]; then
     sysctl -w net.core.rps_sock_flow_entries=\$((rx_count * rps_flow)) >/dev/null 2>&1 || true
 fi
-echo \"[vpnplus-net-tuning] applied iface=\$iface cores=\$cores rx_queues=\$rx_count mask=\$cpu_mask\"
+echo \"[vpnmax-net-tuning] applied iface=\$iface cores=\$cores rx_queues=\$rx_count mask=\$cpu_mask\"
 TUNE
-chmod +x /usr/local/sbin/vpnplus-net-tuning.sh
-cat > /etc/systemd/system/vpnplus-net-tuning.service <<'UNIT'
+chmod +x /usr/local/sbin/vpnmax-net-tuning.sh
+cat > /etc/systemd/system/vpnmax-net-tuning.service <<'UNIT'
 [Unit]
-Description=vpnplus persistent network tuning
+Description=vpnmax persistent network tuning
 After=network-online.target
 Wants=network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/local/sbin/vpnplus-net-tuning.sh
+ExecStart=/usr/local/sbin/vpnmax-net-tuning.sh
 [Install]
 WantedBy=multi-user.target
 UNIT"
     run systemctl daemon-reload || true
-    if ! run systemctl enable --now vpnplus-net-tuning.service; then
+    if ! run systemctl enable --now vpnmax-net-tuning.service; then
         warn "网络调优 systemd 服务启用失败，重启后可能不会自动恢复网卡参数"
     fi
-    ok "多队列 RPS/XPS、ethtool、fq 已配置并持久化 (vpnplus-net-tuning.service)"
+    ok "多队列 RPS/XPS、ethtool、fq 已配置并持久化 (vpnmax-net-tuning.service)"
 }
 
 ensure_grub_boot() {

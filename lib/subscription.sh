@@ -1,7 +1,7 @@
 #!/bin/bash
 # lib/subscription.sh — 订阅管理
-[ -n "${VPNPLUS_SUB_LOADED:-}" ] && return 0
-VPNPLUS_SUB_LOADED=1
+[ -n "${VPNMAX_SUB_LOADED:-}" ] && return 0
+VPNMAX_SUB_LOADED=1
 
 setup_subscription() {
     info "配置本地订阅链接..."

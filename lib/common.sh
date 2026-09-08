@@ -18,7 +18,7 @@ if ! declare -F warn >/dev/null 2>&1; then warn() { echo -e "${YELLOW}[!]${N}   
 if ! declare -F fail >/dev/null 2>&1; then fail() { echo -e "${RED}[✗]${N}   $*"; }; fi
 
 # 部署清单（若外层已定义 MANIFEST 则复用）
-MANIFEST=${MANIFEST:-"/var/log/vpnplus-manifest.log"}
+MANIFEST=${MANIFEST:-"/var/log/vpnmax-manifest.log"}
 manifest() { echo "[$(date -Is)] $*" >>"$MANIFEST" 2>/dev/null || true; }
 
 # DRY_RUN 感知的执行包装
@@ -36,9 +36,44 @@ fi
 # shellcheck disable=SC2034 # used by callers after source
 BASE_PACKAGES=(ca-certificates curl jq git xz-utils tmux iproute2 iptables iptables-persistent procps psmisc util-linux cron ethtool kmod logrotate chrony)
 
+# vpnmax品牌切割迁移：认旧（vpnplus时代）资产并接管，幂等，只做一次有效。
+# 覆盖：旧 systemd units、旧 keepalive 脚本+锁+crontab、旧 logrotate、旧 drop-in、旧 marker。
+# 新资产由正常安装路径重建；调用方须在安装新资产之前调用本函数（先剥旧后立新，防双跑）。
+migrate_legacy_units() {
+    if ${DRY_RUN:-false}; then
+        info "[dry-run] 将迁移旧 vpnplus 资产（units/keepalive/cron/logrotate/drop-in/marker）"
+        return 0
+    fi
+    local _changed=false _u _f _old _new _pair
+    for _u in vpnplus-net-tuning.service vpnplus-netfilter-restore.service; do
+        if [ -e "/etc/systemd/system/$_u" ]; then
+            run systemctl stop "$_u" 2>/dev/null || true
+            run systemctl disable "$_u" 2>/dev/null || true
+            run rm -f "/etc/systemd/system/$_u" 2>/dev/null || true
+            _changed=true
+        fi
+    done
+    for _f in /usr/local/sbin/vpnplus-argo-keepalive.sh /usr/local/sbin/vpnplus-net-tuning.sh /var/lock/vpnplus-argo-keepalive.lock /etc/logrotate.d/vpnplus; do
+        if [ -e "$_f" ]; then run rm -rf "$_f" 2>/dev/null || true; _changed=true; fi
+    done
+    if crontab -l 2>/dev/null | grep -qE 'vpnplus-argo-keepalive|acvpn-argo-keepalive' 2>/dev/null; then
+        (crontab -l 2>/dev/null | grep -vE 'vpnplus-argo-keepalive|acvpn-argo-keepalive|acvn-argo-keepalive' || true) | crontab - 2>/dev/null || true
+        _changed=true
+    fi
+    if [ -f /etc/systemd/system/sing-box.service.d/99-vpnplus.conf ] && [ ! -f /etc/systemd/system/sing-box.service.d/99-vpnmax.conf ]; then
+        run mv /etc/systemd/system/sing-box.service.d/99-vpnplus.conf /etc/systemd/system/sing-box.service.d/99-vpnmax.conf 2>/dev/null || true
+        _changed=true
+    fi
+    for _pair in "/etc/.vpnplus-optimized:/etc/.vpnmax-optimized" "/etc/.vpnplus-singbox:/etc/.vpnmax-singbox"; do
+        _old="${_pair%%:*}"; _new="${_pair##*:}"
+        if [ -f "$_old" ] && [ ! -f "$_new" ]; then run touch "$_new" 2>/dev/null || true; _changed=true; fi
+    done
+    if $_changed; then run systemctl daemon-reload 2>/dev/null || true; ok "旧 vpnplus 资产已迁移接管"; fi
+}
+
 # 日志落盘（若 /var/log 可写）
-if [ -w /var/log ] && [ -d /var/log ] && [ -z "${VPNPLUS_COMMON_LOGGED:-}" ]; then
-    LOG_FILE="/var/log/vpnplus-common.log"
+if [ -w /var/log ] && [ -d /var/log ] && [ -z "${VPNMAX_COMMON_LOGGED:-}" ]; then
+    LOG_FILE="/var/log/vpnmax-common.log"
     : >"$LOG_FILE" 2>/dev/null || true
-    VPNPLUS_COMMON_LOGGED=1
+    VPNMAX_COMMON_LOGGED=1
 fi

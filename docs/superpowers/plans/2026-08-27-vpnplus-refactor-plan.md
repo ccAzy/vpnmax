@@ -1,6 +1,6 @@
-# vpnplus Refactor Plan — A Conservative Split
+# vpnmax Refactor Plan — A Conservative Split
 
-> 设计来源: docs/superpowers/specs/2026-08-27-vpnplus-refactor-design.md
+> 设计来源: docs/superpowers/specs/2026-08-27-vpnmax-refactor-design.md
 > 目标: a稳定 > c低成本变更 > b高效，保持一键裸装兼容，无版本号
 
 ## Task 1: lib/common.sh — 统一日志/运行/清单

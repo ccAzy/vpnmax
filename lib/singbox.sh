@@ -1,7 +1,7 @@
 #!/bin/bash
 # lib/singbox.sh — sing-box 安装与投喂
-[ -n "${VPNPLUS_SINGBOX_LOADED:-}" ] && return 0
-VPNPLUS_SINGBOX_LOADED=1
+[ -n "${VPNMAX_SINGBOX_LOADED:-}" ] && return 0
+VPNMAX_SINGBOX_LOADED=1
 
 sb_feed() { # sb_feed <超时秒数> - <<'KEYS'  ... KB: 用 stdin 传入按键
     local secs="${1:-120}"
@@ -17,8 +17,8 @@ sb_feed() { # sb_feed <超时秒数> - <<'KEYS'  ... KB: 用 stdin 传入按键
     [ -n "$_new_pids" ] && { for _pid in $_new_pids; do kill -9 "$_pid" 2>/dev/null || true; done; }
     # 输出追加进诊断日志（去色），失败时便于回溯 sb 到底做了什么/卡在哪
     if [ -n "$out" ]; then
-        echo "──[sb_feed t=${secs}] $(date -Is)" >>/var/log/vpnplus-sbfeed.log 2>/dev/null || true
-        printf '%s\n' "$out" | sed -E 's/\x1B\[[0-9;]*[mK]//g' >>/var/log/vpnplus-sbfeed.log 2>/dev/null || true
+        echo "──[sb_feed t=${secs}] $(date -Is)" >>/var/log/vpnmax-sbfeed.log 2>/dev/null || true
+        printf '%s\n' "$out" | sed -E 's/\x1B\[[0-9;]*[mK]//g' >>/var/log/vpnmax-sbfeed.log 2>/dev/null || true
     fi
     printf '%s' "$out"
 }
@@ -159,7 +159,7 @@ assert_sb_menu() {
     if [ -n "$ver" ]; then
         info "sb 版本指纹: $ver（脚本投喂序列按锁定 SB_COMMIT 编写）"
         if ! printf '%s' "$ver" | grep -qE '^v2'; then
-            warn "sb 版本 $ver 不是脚本预期的 v2x 系列，菜单序号可能漂移；若后续步骤失败请核对 SB_COMMIT/SB_SHA256 并检查 /var/log/vpnplus-sbfeed.log"
+            warn "sb 版本 $ver 不是脚本预期的 v2x 系列，菜单序号可能漂移；若后续步骤失败请核对 SB_COMMIT/SB_SHA256 并检查 /var/log/vpnmax-sbfeed.log"
         fi
     else
         info "[sb] 未从横幅识别到版本号，继续（依赖 SB_SHA256 锁定的菜单结构）"
@@ -251,7 +251,7 @@ force_ipv4_lock() {
 
 # sing-box 1.12+ legacy domain_strategy 兼容：必须注入环境变量否则 FATAL
 ensure_singbox_legacy_env() {
-    local dropin="/etc/systemd/system/sing-box.service.d/99-vpnplus.conf"
+    local dropin="/etc/systemd/system/sing-box.service.d/99-vpnmax.conf"
     local _dropin_changed=false
     # 确保 drop-in 存在且包含 Environment
     if [ ! -f "$dropin" ] || ! grep -q "ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS" "$dropin" 2>/dev/null; then
@@ -277,7 +277,7 @@ EOF
         # 兼容 sb/xr 服务也注入（若存在）
         for svc in sb xr; do
             if [ -f "/etc/systemd/system/${svc}.service" ]; then
-                local d="/etc/systemd/system/${svc}.service.d/99-vpnplus.conf"
+                local d="/etc/systemd/system/${svc}.service.d/99-vpnmax.conf"
                 mkdir -p "$(dirname "$d")" 2>/dev/null || true
                 grep -q "ENABLE_DEPRECATED" "$d" 2>/dev/null || echo -e "[Service]\nEnvironment=ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS=true" >"$d"
             fi

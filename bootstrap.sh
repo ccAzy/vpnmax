@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-only
 # ===================================================================
-# vpnplus — 环境准备与依赖检查
+# vpnmax — 环境准备与依赖检查
 # 用法: bash bootstrap.sh [--dry-run] [--check-only]
 #
 # 只负责准备 Debian/Ubuntu VPS 的基础工具，不安装内核、不部署 sing-box、
@@ -29,7 +29,7 @@ for arg in "$@"; do
     --force) FORCE=true ;;
     --help | -h)
         cat <<'HELP'
-vpnplus bootstrap.sh — 环境准备与依赖检查
+vpnmax bootstrap.sh — 环境准备与依赖检查
 用法: bash bootstrap.sh [--dry-run] [--check-only] [--force]
   --dry-run    只显示将安装的包，不修改系统
   --check-only 只检查，不执行 apt update/install
@@ -84,7 +84,7 @@ MEM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo
 BOOT_MB=$(df -Pm /boot 2>/dev/null | awk 'NR==2 {print $4}')
 [ -n "${BOOT_MB:-}" ] && [ "$BOOT_MB" -lt 200 ] && warn "/boot 可用空间低于 200MB（当前 ${BOOT_MB}MB）"
 
-# 命令 -> Debian 包映射；这些包覆盖 vpnplus 两个部署阶段与 Hermes CLI 的基础环境。
+# 命令 -> Debian 包映射；这些包覆盖 vpnmax 两个部署阶段与 Hermes CLI 的基础环境。
 PACKAGES=(
     ca-certificates curl jq git xz-utils tmux
     bash coreutils grep sed gawk

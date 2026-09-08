@@ -1,7 +1,7 @@
 #!/bin/bash
 # lib/warp.sh — WARP 与分流
-[ -n "${VPNPLUS_WARP_LOADED:-}" ] && return 0
-VPNPLUS_WARP_LOADED=1
+[ -n "${VPNMAX_WARP_LOADED:-}" ] && return 0
+VPNMAX_WARP_LOADED=1
 
 setup_warp() {
     info "清理旧 WARP 残留..."
@@ -59,7 +59,7 @@ EOSUB
 
 fix_mport_dup() {
     # sb 的 hy2 mport 来源是: iptables -t nat -nL | grep hy2_port | awk '{print $8}'
-    # 若 PREROUTING 残留 + ACVPN_PORTHOP 各有一条 DNAT，sb 会拼成 "40000-42000,40000-42000"。
+    # 若 PREROUTING 残留 + VPNMAX_PORTHOP 各有一条 DNAT，sb 会拼成 "40000-42000,40000-42000"。
     # 这里做幂等去重：对 hy2.txt / jhsub.txt / websbox 副本的 mport= 去重逗号段。
     local changed=false f
     for f in /etc/s-box/hy2.txt /etc/s-box/jhsub.txt; do
@@ -67,7 +67,7 @@ fix_mport_dup() {
         # 仅当出现重复逗号段时处理
         if grep -q 'mport=' "$f" 2>/dev/null && grep -q 'mport=.*,' "$f" 2>/dev/null; then
             local tmp
-            tmp=$(mktemp /tmp/vpnplus-mport.XXXXXX)
+            tmp=$(mktemp /tmp/vpnmax-mport.XXXXXX)
             # 逐行：把 mport= 后的逗号列表去重（保留首次出现顺序）
             python3 - "$f" "$tmp" <<'PY' 2>/dev/null || true
 import sys, re
@@ -117,14 +117,14 @@ PY
 
 setup_logrotate() {
     if $DRY_RUN; then
-        info "[dry-run] 安装 /etc/logrotate.d/vpnplus（轮转 vpnplus 各类日志）"
+        info "[dry-run] 安装 /etc/logrotate.d/vpnmax（轮转 vpnmax 各类日志）"
         return 0
     fi
-    cat >/etc/logrotate.d/vpnplus <<'ROT'
-/var/log/vpnplus-optimize.log
-/var/log/vpnplus-optimize-manifest.log
-/var/log/vpnplus-singbox-manifest.log
-/var/log/vpnplus-sbfeed.log
+    cat >/etc/logrotate.d/vpnmax <<'ROT'
+/var/log/vpnmax-optimize.log
+/var/log/vpnmax-optimize-manifest.log
+/var/log/vpnmax-singbox-manifest.log
+/var/log/vpnmax-sbfeed.log
 /etc/s-box/argo.log
 {
     weekly
@@ -136,10 +136,10 @@ setup_logrotate() {
     copytruncate
 }
 ROT
-    chmod 0644 /etc/logrotate.d/vpnplus 2>/dev/null || true
+    chmod 0644 /etc/logrotate.d/vpnmax 2>/dev/null || true
     # 若 logrotate 服务在则检查配置语法
-    command -v logrotate >/dev/null 2>&1 && logrotate -d /etc/logrotate.d/vpnplus >/dev/null 2>&1 &&
-        ok "日志轮转已配置 (/etc/logrotate.d/vpnplus，周轮+保留4份+压缩)" ||
+    command -v logrotate >/dev/null 2>&1 && logrotate -d /etc/logrotate.d/vpnmax >/dev/null 2>&1 &&
+        ok "日志轮转已配置 (/etc/logrotate.d/vpnmax，周轮+保留4份+压缩)" ||
         warn "logrotate 配置已写，但语法校验未通过或 logrotate 未安装（日志将不轮转）"
     return 0
 }

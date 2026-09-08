@@ -1,7 +1,7 @@
 #!/bin/bash
 # lib/firewall.sh — 防火墙与端口跳跃
-[ -n "${VPNPLUS_FIREWALL_LOADED:-}" ] && return 0
-VPNPLUS_FIREWALL_LOADED=1
+[ -n "${VPNMAX_FIREWALL_LOADED:-}" ] && return 0
+VPNMAX_FIREWALL_LOADED=1
 
 readonly HOP_HY_RANGE="40000:42000" # Hysteria2 端口跳跃段
 readonly HOP_TU_RANGE="43000:45000" # Tuic5 端口跳跃段
@@ -12,8 +12,38 @@ readonly RATE_UDP_BURST=400 # UDP 端口/跳跃段 限速 /sec、burst
 readonly CONN_ABOVE=200     # 单 IP 单端口新建连接上限
 readonly SSH_RATE_ABOVE=3
 readonly SSH_RATE_BURST=5 # SSH 爆破防御 3/min、burst
-CHAIN_PORTHOP="ACVPN_PORTHOP"
-CHAIN_ANTIPROBE="ACVPN_ANTIPROBE"
+CHAIN_PORTHOP="VPNMAX_PORTHOP"
+CHAIN_ANTIPROBE="VPNMAX_ANTIPROBE"
+CHAIN_RSS="VPNMAX_RSS"
+# 旧链名（vpnplus时代）：迁移期识别与清理用，新部署不再创建
+LEGACY_CHAINS="ACVPN_PORTHOP ACVPN_ANTIPROBE ACVPN_RSS"
+
+# 品牌切割：拆除旧 ACVPN_* 链（删跳转→flush→delete，v4+v6，filter+nat）。
+# 调用时机：新链建成“之前”调一次做预清理；新链建成且跳转切换后，旧链若还在则再清一次。
+# 只碰明确属于旧品牌的链名，不碰第三方规则。
+migrate_legacy_chains() {
+    if ${DRY_RUN:-false}; then
+        info "[dry-run] 将拆除旧 ACVPN_* 链"
+        return 0
+    fi
+    local _c
+    for _c in $LEGACY_CHAINS; do
+        run iptables -D INPUT -j "$_c" 2>/dev/null || true
+        run iptables -t nat -D PREROUTING -j "$_c" 2>/dev/null || true
+        run iptables -F "$_c" 2>/dev/null || true
+        run iptables -t nat -F "$_c" 2>/dev/null || true
+        run iptables -X "$_c" 2>/dev/null || true
+        run iptables -t nat -X "$_c" 2>/dev/null || true
+        if command -v ip6tables >/dev/null 2>&1; then
+            run ip6tables -D INPUT -j "$_c" 2>/dev/null || true
+            run ip6tables -t nat -D PREROUTING -j "$_c" 2>/dev/null || true
+            run ip6tables -F "$_c" 2>/dev/null || true
+            run ip6tables -t nat -F "$_c" 2>/dev/null || true
+            run ip6tables -X "$_c" 2>/dev/null || true
+            run ip6tables -t nat -X "$_c" 2>/dev/null || true
+        fi
+    done
+}
 
 persist_firewall() {
     if $DRY_RUN; then
@@ -33,9 +63,9 @@ persist_firewall() {
     iptables-save >/etc/iptables/rules.v4 2>/dev/null || true
     ip6tables-save >/etc/iptables/rules.v6 2>/dev/null || true
     if [ -s /etc/iptables/rules.v4 ]; then
-        cat >/etc/systemd/system/vpnplus-netfilter-restore.service <<'UNIT'
+        cat >/etc/systemd/system/vpnmax-netfilter-restore.service <<'UNIT'
 [Unit]
-Description=vpnplus iptables restore (before network)
+Description=vpnmax iptables restore (before network)
 DefaultDependencies=no
 Before=network-pre.target
 Wants=network-pre.target
@@ -50,11 +80,11 @@ ExecStart=/usr/sbin/ip6tables-restore -n /etc/iptables/rules.v6
 WantedBy=multi-user.target
 UNIT
         systemctl daemon-reload 2>/dev/null || true
-        if systemctl enable vpnplus-netfilter-restore.service 2>/dev/null; then
-            ok "vpnplus-netfilter-restore.service 已启用（开机恢复新链规则，双保险）"
+        if systemctl enable vpnmax-netfilter-restore.service 2>/dev/null; then
+            ok "vpnmax-netfilter-restore.service 已启用（开机恢复新链规则，双保险）"
             saved=true
         else
-            warn "enabling vpnplus-netfilter-restore.service 失败"
+            warn "enabling vpnmax-netfilter-restore.service 失败"
         fi
     fi
     $saved || warn "防火墙规则未能持久化（重启后需重新配置）"
@@ -79,6 +109,8 @@ apply_antiprobe() {
         else TCP_PORTS+=("$p"); fi
     done < <(jq -r '.inbounds[] | "\(.listen_port)|\(.type)|\(.tls.enabled // "false")"' /etc/s-box/sb.json 2>/dev/null || true)
 
+    # 品牌切割：先拆旧 ACVPN_* 链，再彻底重建新链（幂等且不碰第三方规则）
+    if declare -F migrate_legacy_chains >/dev/null 2>&1; then migrate_legacy_chains || true; fi
     # 先彻底重建链：删跳转 → flush → delete（幂等且不碰第三方规则）
     run iptables -D INPUT -j "$CHAIN_ANTIPROBE" 2>/dev/null || true
     run iptables -F "$CHAIN_ANTIPROBE" 2>/dev/null || true
@@ -159,7 +191,9 @@ config_port_hopping() {
     HY_PORT=$(jq -r '.inbounds[] | select(.type=="hysteria2") | .listen_port' /etc/s-box/sb.json 2>/dev/null || true)
     TU_PORT=$(jq -r '.inbounds[] | select(.type=="tuic") | .listen_port' /etc/s-box/sb.json 2>/dev/null || true)
 
-    # 清理旧 ACVPN_PORTHOP 链（幂等，不碰系统其他 nat 规则）
+    # 品牌切割：先拆旧 ACVPN_* 链
+    if declare -F migrate_legacy_chains >/dev/null 2>&1; then migrate_legacy_chains || true; fi
+    # 清理旧 VPNMAX_PORTHOP 链（幂等，不碰系统其他 nat 规则）
     run iptables -t nat -D PREROUTING -j "$CHAIN_PORTHOP" 2>/dev/null || true
     run iptables -t nat -F "$CHAIN_PORTHOP" 2>/dev/null || true
     run iptables -t nat -X "$CHAIN_PORTHOP" 2>/dev/null || true
@@ -171,12 +205,12 @@ config_port_hopping() {
 
     # 清理 sing-box 透明代理/TUN 残留的孤立端口跳跃规则（重跑会累积指向旧端口的过期 DNAT/REDIRECT）
     # 背景（2026-08-24 HK 实测）：每天重跑前，PREROUTING 里堆积了指向已废弃端口的
-    #   DNAT(40000:42000→旧hy端口 / 43000:45000→旧tu端口) 和重复 REDIRECT，且排在 ACVPN_PORTHOP 之前，
+    #   DNAT(40000:42000→旧hy端口 / 43000:45000→旧tu端口) 和重复 REDIRECT，且排在 VPNMAX_PORTHOP 之前，
     #   优先命中把 hy2/tuic 跳跃段流量引到不存在的端口 → 节点握手无响应、客户端"不通"。
-    # 本段只在确认为 vpnplus 的跳跃段(40000:42000 / 43000:45000 udp)内精确清理，不碰其他 NAT 规则。
+    # 本段只在确认为 vpnmax 的跳跃段(40000:42000 / 43000:45000 udp)内精确清理，不碰其他 NAT 规则。
     info "清理 sing-box 残留的过期端口跳跃规则..."
     local done_hop=false
-    # 按行号删除 PREROUTING 中任何 HOP_HY_RANGE / HOP_TU_RANGE 的 UDP DNAT/REDIRECT（不碰 ACVPN_PORTHOP 链内规则与原样跳转）
+    # 按行号删除 PREROUTING 中任何 HOP_HY_RANGE / HOP_TU_RANGE 的 UDP DNAT/REDIRECT（不碰 VPNMAX_PORTHOP 链内规则与原样跳转）
     while :; do
         local rnum
         rnum=$(iptables -t nat -L PREROUTING -n --line-numbers 2>/dev/null |
@@ -231,7 +265,7 @@ fi
 
 if ! declare -F clean_chains >/dev/null 2>&1; then
     clean_chains() {
-        echo "--- 清理 vpnplus 独立防火墙链 ---"
+        echo "--- 清理 vpnmax 独立防火墙链 ---"
         run iptables -D INPUT -j "$CHAIN_ANTIPROBE" 2>/dev/null
         run iptables -D INPUT -j "$CHAIN_RSS" 2>/dev/null
         run iptables -t nat -D PREROUTING -j "$CHAIN_PORTHOP" 2>/dev/null

@@ -12,8 +12,8 @@
 #   2) 记录最优 colo → edge-prefer.log，供 verify 校验隧道实际落地
 #   3) 若用户显式 ARGO_REGION=xx，则透传 --region（cloudflared 自校验合法性）
 # 默认开启（EDGE_PREFER=off 可跳过），全程有预算上限，不卡死一键部署。
-[ -n "${VPNPLUS_EDGEPREFER_LOADED:-}" ] && return 0
-VPNPLUS_EDGEPREFER_LOADED=1
+[ -n "${VPNMAX_EDGEPREFER_LOADED:-}" ] && return 0
+VPNMAX_EDGEPREFER_LOADED=1
 
 ensure_edge_prefer() {
     if [ "${EDGE_PREFER:-on}" = "off" ]; then
