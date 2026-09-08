@@ -290,11 +290,24 @@ PUBLIC_IP=$(curl -fsSL --max-time 5 https://api.ipify.org 2>/dev/null) ||
 #   2) 否则 → API 取最新 max tag，并同样强制 SHA256 校验
 if ! declare -F install_bbrv3 >/dev/null 2>&1; then
     install_bbrv3() {
+        # vpnmax融合回退副本：内核产物自供（本仓 kernel/ 定时构建），主仓缺失时桥接老仓。
+        local _repo_primary="${BBR_RELEASE_REPO:-ccAzy/vpnmax}" _repo_fallback="ccAzy/Actions-bbr-v3"
+        bbr_api_get() {
+            local _p="$1" _r _out
+            for _r in "$_repo_primary" "$_repo_fallback"; do
+                _out=$(curl -fsL -H "$UA" --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 20 "https://api.github.com/repos/$_r/$_p" 2>/dev/null || true)
+                if [ -n "$_out" ] && ! echo "$_out" | grep -q '"message"'; then
+                    [ "$_r" != "$_repo_primary" ] && warn "vpnmax 暂无对应产物，桥接使用 $_r（过渡期）"
+                    printf '%s' "$_out"
+                    return 0
+                fi
+            done
+            return 1
+        }
         if echo "$CUR_KERNEL" | grep -q "bbrv3"; then
             local cur_ver latest_tag latest_ver
             cur_ver=$(echo "$CUR_KERNEL" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' || true)
-            latest_tag=$(curl -fsL -H "$UA" --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 20 \
-                "https://api.github.com/repos/ccAzy/Actions-bbr-v3/releases?per_page=10" 2>/dev/null |
+            latest_tag=$(bbr_api_get "releases?per_page=10" 2>/dev/null |
                 jq -r '.[].tag_name // empty' | grep -F 'max' | head -1 || true)
             latest_ver=$(echo "$latest_tag" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
             if [ -z "$latest_ver" ]; then
@@ -317,14 +330,12 @@ if ! declare -F install_bbrv3 >/dev/null 2>&1; then
             [ "$DEB_ARCH" = "amd64" ] && arch_tag="x86_64"
             TAG="${arch_tag}-${VERSION_PIN}-max"
             info "锁定版本: $TAG"
-            api_json=$(curl -fsL -H "$UA" --retry 2 --retry-delay 2 --connect-timeout 15 --max-time 30 \
-                "https://api.github.com/repos/ccAzy/Actions-bbr-v3/releases/tags/${TAG}" 2>/dev/null || true)
+            api_json=$(bbr_api_get "releases/tags/${TAG}" 2>/dev/null || true)
             DOWNLOAD_URL=$(echo "$api_json" | jq -r '.assets[]?.browser_download_url // empty' |
                 grep -F "linux-image-" | grep -F "joeyblog-bbrv3" | grep -F "$DEB_ARCH.deb" | head -1 || true)
         else
             # 默认：取最新 -max release
-            api_json=$(curl -fsL -H "$UA" --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 20 \
-                "https://api.github.com/repos/ccAzy/Actions-bbr-v3/releases?per_page=10" 2>/dev/null || true)
+            api_json=$(bbr_api_get "releases?per_page=10" 2>/dev/null || true)
             DOWNLOAD_URL=$(echo "$api_json" | jq -r '.[].assets[]?.browser_download_url // empty' |
                 grep -F "linux-image-" | grep -F "joeyblog-bbrv3-max" | grep -F "$DEB_ARCH.deb" | head -1 || true)
         fi

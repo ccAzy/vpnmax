@@ -345,6 +345,7 @@ curl -v http://127.0.0.1:订阅端口/token/clmi.yaml
 ## vpnmax 融合说明（相对 vpnmax 的增量）
 
 - **sb 零上游**：`vendor/sb.sh` 入仓，部署优先本地拷贝，缺失才回退自家 raw，全程 SHA256 校验；`SB_URL` 已指向自家仓库。
+- **BBR 内核自供**：`kernel/` 移植自家构建流水线（每日定时构建发 release），部署默认从本仓 release 拉 deb，首个构建落地前桥接回退老仓（warn 标明）。
 - **边缘优选**：`lib/edgeprefer.sh` 在 Argo 启动前采样官方段，选最优 colo 与 v4/v6 家族，经 `argo-extra.conf` 注入隧道；`EDGE_PREFER=off` 可跳过，`ARGO_REGION=xx` 可手动 pin region。
 - **出口 prefer_ipv4 常态化**：不再仅 `--force` 才修，幂等对齐。
 - **verify 1c 回归**：SSH/旧残留/内核/cloudflared pin 版/订阅-隧道一致性。

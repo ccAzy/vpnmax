@@ -10,3 +10,11 @@ config.yaml
 *_key
 *_rsa
 *.pem
+
+# kernel 自构建产物（只进 release，不进仓库）
+kernel/linux/
+kernel/*.deb
+kernel/SHA256SUMS
+kernel/build-configs/
+kernel/publish-markers/
+kernel/generated-configs/
