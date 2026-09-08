@@ -701,6 +701,16 @@ apply_qdisc || true
 boost_limits
 apply_rss
 
+# ── 智能带宽/亚太调优（移植自 byJoey，非交互化） ──
+# 环境变量控制: VPNMAX_BUFFER_MODE=apac|smart|default（默认 smart）
+_buffer_mode="${VPNMAX_BUFFER_MODE:-smart}"
+case "$_buffer_mode" in
+apac) apply_apac_tuning ;;
+smart) apply_smart_bandwidth_tuning ;;
+default) info "跳过智能带宽调优（VPNMAX_BUFFER_MODE=default）" ;;
+*) apply_smart_bandwidth_tuning ;;
+esac
+
 if $BBR_OK; then
     ensure_grub_boot || warn "GRUB 默认引导项未确认；若重启后进入旧内核请手动处理"
     run touch "$MARK"

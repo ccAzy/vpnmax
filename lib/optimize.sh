@@ -371,3 +371,123 @@ ensure_grub_boot() {
         info "GRUB_DEFAULT=$gd，BBRv3 位于 index $target；若重启未进新内核请手动改"
     fi
 }
+
+# ── 智能带宽调优（移植自 byJoey/Actions-bbr-v3，非交互化） ──
+# 根据服务器内存 + 带宽 + 线路区域自动计算 TCP buffer 大小
+# 用法: VPNMAX_BUFFER_MODE=apac|smart|default bash deploy_optimize.sh
+#   apac   = 亚太固定档（tcp_wmem 12MB / tcp_rmem 32MB）
+#   smart  = 自动测速 + 按区域算 buffer
+#   default = 不覆盖，保持 apply_sysctl 的默认值
+get_tcp_buffer_cap_mb() {
+    local mem_kb
+    mem_kb=$(awk '/MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null)
+    if ! [[ "$mem_kb" =~ ^[0-9]+$ ]]; then
+        echo 64
+    elif ((mem_kb < 524288)); then
+        echo 16
+    elif ((mem_kb < 1048576)); then
+        echo 32
+    else
+        echo 64
+    fi
+}
+
+calculate_smart_buffer_mb() {
+    local bandwidth="$1" region="$2" cap="$3"
+    local buf=16
+    bandwidth="${bandwidth%.*}"
+    [[ "$bandwidth" =~ ^[0-9]+$ ]] && ((bandwidth > 0)) || bandwidth=1000
+    if [[ "$region" == "overseas" ]]; then
+        if ((bandwidth < 500)); then
+            buf=16
+        elif ((bandwidth < 1000)); then
+            buf=48
+        else buf=64; fi
+    else # asia
+        if ((bandwidth < 500)); then
+            buf=8
+        elif ((bandwidth < 1000)); then
+            buf=12
+        elif ((bandwidth < 2000)); then
+            buf=16
+        elif ((bandwidth < 5000)); then
+            buf=24
+        elif ((bandwidth < 10000)); then
+            buf=28
+        else buf=32; fi
+    fi
+    ((buf > cap)) && buf="$cap"
+    echo "$buf"
+}
+
+# 亚太固定档：大 buffer，适合低延迟高带宽线路
+apply_apac_tuning() {
+    info "应用亚太线路 TCP 调优（固定档: wmem 12MB / rmem 32MB）..."
+    local wmem_max=12582912 rmem_max=33554432
+    local conf="/etc/sysctl.d/99-vpnmax-brutal.conf"
+    # 覆盖 apply_sysctl 写入的 wmem/rmem 值
+    if [ -f "$conf" ]; then
+        sed -i "s|^net.ipv4.tcp_wmem = .*|net.ipv4.tcp_wmem = 4096 16384 $wmem_max|" "$conf"
+        sed -i "s|^net.ipv4.tcp_rmem = .*|net.ipv4.tcp_rmem = 4096 131072 $rmem_max|" "$conf"
+        sed -i "s|^net.core.rmem_max = .*|net.core.rmem_max = $rmem_max|" "$conf"
+        sed -i "s|^net.core.wmem_max = .*|net.core.wmem_max = $wmem_max|" "$conf"
+    fi
+    sysctl -w net.ipv4.tcp_wmem="4096 16384 $wmem_max" >/dev/null 2>&1 || true
+    sysctl -w net.ipv4.tcp_rmem="4096 131072 $rmem_max" >/dev/null 2>&1 || true
+    sysctl -w net.core.rmem_max="$rmem_max" >/dev/null 2>&1 || true
+    sysctl -w net.core.wmem_max="$wmem_max" >/dev/null 2>&1 || true
+    ok "亚太 TCP 调优已生效（wmem_max=$((wmem_max / 1024 / 1024))MB, rmem_max=$((rmem_max / 1024 / 1024))MB）"
+    manifest "apac_tuning wmem_max=$wmem_max rmem_max=$rmem_max"
+}
+
+# 智能带宽调优：自动测速 → 按区域算 buffer → 写入 sysctl
+apply_smart_bandwidth_tuning() {
+    local bandwidth="${VPNMAX_BANDWIDTH:-}"
+    local region="${VPNMAX_REGION:-}"
+    # 自动检测区域（无交互）
+    if [ -z "$region" ]; then
+        local ip country
+        ip=$(curl -s4m5 https://api.ipify.org 2>/dev/null || true)
+        if [ -n "$ip" ]; then
+            country=$(curl -s "https://ipinfo.io/$ip/country" 2>/dev/null || true)
+            case "$country" in
+            JP | KR | TW | HK | SG | TH | VN | MY | ID | PH | IN | AU | NZ) region="asia" ;;
+            US | CA | GB | DE | FR | NL | ES | IT | PL | CZ | SE | NO | FI | CH | AT | BE | IE | PT) region="overseas" ;;
+            *) region="asia" ;; # 默认亚太（ vpnmax 主要用户群）
+            esac
+        else
+            region="asia"
+        fi
+    fi
+    # 自动测速（无交互，失败用默认值）
+    if [ -z "$bandwidth" ]; then
+        if command -v curl >/dev/null 2>&1; then
+            local dl_bytes dl_mbps
+            dl_bytes=$(curl -sLo /dev/null -w '%{size_download}' --max-time 10 \
+                "https://speed.cloudflare.com/__down?bytes=10000000" 2>/dev/null || true)
+            if [[ "$dl_bytes" =~ ^[0-9]+$ ]] && ((dl_bytes > 1000000)); then
+                dl_mbps=$((dl_bytes * 8 / 10000 / 10)) # 粗估 Mbit/s
+                bandwidth="$dl_mbps"
+                info "自动测速: 约 ${dl_mbps} Mbit/s（10MB 下载）"
+            fi
+        fi
+        [ -z "$bandwidth" ] && bandwidth=1000
+    fi
+    local cap buf_mb buf_bytes
+    cap=$(get_tcp_buffer_cap_mb)
+    buf_mb=$(calculate_smart_buffer_mb "$bandwidth" "$region" "$cap")
+    buf_bytes=$((buf_mb * 1024 * 1024))
+    local conf="/etc/sysctl.d/99-vpnmax-brutal.conf"
+    if [ -f "$conf" ]; then
+        sed -i "s|^net.ipv4.tcp_wmem = .*|net.ipv4.tcp_wmem = 4096 65536 $buf_bytes|" "$conf"
+        sed -i "s|^net.ipv4.tcp_rmem = .*|net.ipv4.tcp_rmem = 4096 87380 $buf_bytes|" "$conf"
+        sed -i "s|^net.core.rmem_max = .*|net.core.rmem_max = $buf_bytes|" "$conf"
+        sed -i "s|^net.core.wmem_max = .*|net.core.wmem_max = $buf_bytes|" "$conf"
+    fi
+    sysctl -w net.ipv4.tcp_wmem="4096 65536 $buf_bytes" >/dev/null 2>&1 || true
+    sysctl -w net.ipv4.tcp_rmem="4096 87380 $buf_bytes" >/dev/null 2>&1 || true
+    sysctl -w net.core.rmem_max="$buf_bytes" >/dev/null 2>&1 || true
+    sysctl -w net.core.wmem_max="$buf_bytes" >/dev/null 2>&1 || true
+    ok "智能带宽调优已生效（区域=$region, 带宽=${bandwidth}Mbit, buffer=${buf_mb}MB, cap=${cap}MB）"
+    manifest "smart_tuning region=$region bandwidth=${bandwidth}Mbit buffer=${buf_mb}MB cap=${cap}MB"
+}
