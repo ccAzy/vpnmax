@@ -23,7 +23,7 @@ check_sync() {
     # 否则该 lib 函数在 curl 裸装时缺失。firewall/time 的部分函数分布在 cleanup/verify。
     local lib
     for lib in lib/common.sh lib/time.sh lib/optimize.sh lib/firewall.sh \
-               lib/singbox.sh lib/subscription.sh lib/argo.sh lib/warp.sh; do
+        lib/singbox.sh lib/subscription.sh lib/argo.sh lib/warp.sh; do
         local func
         for func in $(grep -oE '^[a-z_]+\(\)' "$lib" 2>/dev/null | tr -d '()' | sort -u); do
             if ! grep -qE "$func\(|declare -F $func" deploy_optimize.sh deploy_singbox.sh verify.sh cleanup.sh bootstrap.sh 2>/dev/null; then

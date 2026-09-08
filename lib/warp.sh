@@ -23,16 +23,17 @@ EOSUB
     else
         info "[dry-run] sb 菜单 14-1 安装 WARP"
     fi
-    if [ -f /etc/s-box/sbwpph ] && pgrep -f sbwpph >/dev/null; then ok "WARP-plus-Socks5 已安装并运行"
-    elif [ -f /etc/s-box/sbwpph ]; then warn "WARP 文件存在但进程未运行，尝试: sb → 14 → 1"
+    if [ -f /etc/s-box/sbwpph ] && pgrep -f sbwpph >/dev/null; then
+        ok "WARP-plus-Socks5 已安装并运行"
+    elif [ -f /etc/s-box/sbwpph ]; then
+        warn "WARP 文件存在但进程未运行，尝试: sb → 14 → 1"
     else warn "WARP 安装失败（不影响核心代理功能，域名分流不可用）"; fi
 }
 
-
-
 setup_domain_routing() {
     if [ ! -f /etc/s-box/sbwpph ] || ! pgrep -f sbwpph >/dev/null; then
-        warn "WARP 未运行，跳过域名分流"; return 0
+        warn "WARP 未运行，跳过域名分流"
+        return 0
     fi
     info "配置域名分流（WARP-socks5-ipv4 优先）..."
     if ! $DRY_RUN; then
@@ -51,11 +52,10 @@ EOSUB
     fi
     local CHECK
     CHECK=$(grep -c 'openai.com' /etc/s-box/sb.json 2>/dev/null || true)
-    if [ "${CHECK:-0}" -gt 0 ]; then ok "域名分流已配置，AI + 流媒体 + 搜索引擎走 WARP"
+    if [ "${CHECK:-0}" -gt 0 ]; then
+        ok "域名分流已配置，AI + 流媒体 + 搜索引擎走 WARP"
     else warn "分流配置可能未完全生效，可稍后手动 sb → 5 检查"; fi
 }
-
-
 
 fix_mport_dup() {
     # sb 的 hy2 mport 来源是: iptables -t nat -nL | grep hy2_port | awk '{print $8}'
@@ -90,7 +90,7 @@ with open(src, encoding='utf-8', errors='ignore') as s, open(dst,'w', encoding='
         d.write(dedup_line(ln))
 PY
             if [ -s "$tmp" ] && ! cmp -s "$f" "$tmp" 2>/dev/null; then
-                cat "$tmp" > "$f" 2>/dev/null && changed=true
+                cat "$tmp" >"$f" 2>/dev/null && changed=true
             fi
             rm -f "$tmp" 2>/dev/null || true
             # python3 不可用/失败时的兜底：仅修已知双写
@@ -103,7 +103,7 @@ PY
         # 同步 websbox 目录（busybox httpd 根）
         if [ -f /etc/s-box/subtoken.log ] && [ -d /root/websbox ]; then
             local tok
-            tok=$(tr -cd 'a-zA-Z0-9_-' < /etc/s-box/subtoken.log 2>/dev/null || true)
+            tok=$(tr -cd 'a-zA-Z0-9_-' </etc/s-box/subtoken.log 2>/dev/null || true)
             [ -n "$tok" ] && [ -d "/root/websbox/$tok" ] && {
                 cp -f /etc/s-box/jhsub.txt "/root/websbox/$tok/jhsub.txt" 2>/dev/null || true
                 cp -f /etc/s-box/hy2.txt "/root/websbox/$tok/hy2.txt" 2>/dev/null || true
@@ -115,11 +115,12 @@ PY
     fi
 }
 
-
-
 setup_logrotate() {
-    if $DRY_RUN; then info "[dry-run] 安装 /etc/logrotate.d/vpnplus（轮转 vpnplus 各类日志）"; return 0; fi
-    cat > /etc/logrotate.d/vpnplus <<'ROT'
+    if $DRY_RUN; then
+        info "[dry-run] 安装 /etc/logrotate.d/vpnplus（轮转 vpnplus 各类日志）"
+        return 0
+    fi
+    cat >/etc/logrotate.d/vpnplus <<'ROT'
 /var/log/vpnplus-optimize.log
 /var/log/vpnplus-optimize-manifest.log
 /var/log/vpnplus-singbox-manifest.log
@@ -137,10 +138,8 @@ setup_logrotate() {
 ROT
     chmod 0644 /etc/logrotate.d/vpnplus 2>/dev/null || true
     # 若 logrotate 服务在则检查配置语法
-    command -v logrotate >/dev/null 2>&1 && logrotate -d /etc/logrotate.d/vpnplus >/dev/null 2>&1 \
-        && ok "日志轮转已配置 (/etc/logrotate.d/vpnplus，周轮+保留4份+压缩)" \
-        || warn "logrotate 配置已写，但语法校验未通过或 logrotate 未安装（日志将不轮转）"
+    command -v logrotate >/dev/null 2>&1 && logrotate -d /etc/logrotate.d/vpnplus >/dev/null 2>&1 &&
+        ok "日志轮转已配置 (/etc/logrotate.d/vpnplus，周轮+保留4份+压缩)" ||
+        warn "logrotate 配置已写，但语法校验未通过或 logrotate 未安装（日志将不轮转）"
     return 0
 }
-
-

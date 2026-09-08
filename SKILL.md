@@ -58,7 +58,7 @@ bash bootstrap.sh --dry-run
 ### 第 1 步：暴力优化 + BBRv3（强制校验） + 重启
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnplus/main/deploy_optimize.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_optimize.sh)
 ```
 
 自动完成：
@@ -79,7 +79,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnplus/main/deploy_op
 ### 第 2 步：部署 sing-box（重启后）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnplus/main/deploy_singbox.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_singbox.sh | bash
 ```
 
 自动完成：

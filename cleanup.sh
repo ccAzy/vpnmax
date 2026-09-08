@@ -20,8 +20,10 @@ set -euo pipefail
 # lib 加载（保持单文件可独立运行）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for _lib in common firewall; do
-    if [ -f "$SCRIPT_DIR/lib/${_lib}.sh" ]; then source "$SCRIPT_DIR/lib/${_lib}.sh" 2>/dev/null || true
-    elif [ -f "lib/${_lib}.sh" ]; then source "lib/${_lib}.sh" 2>/dev/null || true
+    if [ -f "$SCRIPT_DIR/lib/${_lib}.sh" ]; then
+        source "$SCRIPT_DIR/lib/${_lib}.sh" 2>/dev/null || true
+    elif [ -f "lib/${_lib}.sh" ]; then
+        source "lib/${_lib}.sh" 2>/dev/null || true
     fi
 done
 
@@ -29,20 +31,27 @@ FORCE=""
 DRY_RUN=false
 for arg in "$@"; do
     case "$arg" in
-        --force)   FORCE="--force" ;;
-        --dry-run) DRY_RUN=true ;;
+    --force) FORCE="--force" ;;
+    --dry-run) DRY_RUN=true ;;
     esac
 done
 
 BAK_DIR="/var/backups/vpnplus"
-CHAIN_ANTIPROBE="ACVPN_ANTIPROBE"   # filter INPUT 子链
-CHAIN_PORTHOP="ACVPN_PORTHOP"       # nat PREROUTING 子链
-CHAIN_RSS="ACVPN_RSS"               # filter INPUT 子链（RSS 若曾加过）
+CHAIN_ANTIPROBE="ACVPN_ANTIPROBE" # filter INPUT 子链
+CHAIN_PORTHOP="ACVPN_PORTHOP"     # nat PREROUTING 子链
+CHAIN_RSS="ACVPN_RSS"             # filter INPUT 子链（RSS 若曾加过）
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; N='\033[0m'
-ok()   { echo -e "${GREEN}[✓]${N}   $*"; }
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+N='\033[0m'
+ok() { echo -e "${GREEN}[✓]${N}   $*"; }
 warn() { echo -e "${YELLOW}[!]${N}   $*"; }
-die()  { echo -e "${RED}[✗]${N}   $*"; exit 1; }
+die() {
+    echo -e "${RED}[✗]${N}   $*"
+    exit 1
+}
 info() { echo -e "${CYAN}[*]${N}   $*"; }
 
 # dry-run 安全的执行包装：--dry-run 只打印将执行的动作，不真正执行
@@ -63,70 +72,73 @@ echo ""
 if [ "$FORCE" != "--force" ]; then
     echo -e "${YELLOW}警告：将清除所有 sing-box 相关配置、进程、定时任务。${N}"
     if [ -t 0 ]; then read -r -p "确认继续？[y/N] " confirm; else confirm=n; fi
-    [ "$confirm" != "y" ] && [ "$confirm" != "Y" ] && { echo "已取消"; exit 0; }
+    [ "$confirm" != "y" ] && [ "$confirm" != "Y" ] && {
+        echo "已取消"
+        exit 0
+    }
 fi
 
 # ———————— 0. 备份当前防火墙规则（清理前快照，可回滚） ————————
 if ! declare -F bak_firewall >/dev/null 2>&1; then
-bak_firewall() {
-    echo "--- 备份防火墙规则 ---"
-    run mkdir -p "$BAK_DIR"
-    local stamp
-    stamp=$(date +%Y%m%d-%H%M%S)
-    if command -v iptables-save >/dev/null 2>&1; then
-        run bash -c "iptables-save > '$BAK_DIR/iptables.$stamp' 2>/dev/null"
-        run bash -c "ip6tables-save > '$BAK_DIR/ip6tables.$stamp' 2>/dev/null || true"
-        ok "iptables 规则已备份到 $BAK_DIR (iptables.$stamp)"
-    fi
-    if command -v nft >/dev/null 2>&1; then
-        run bash -c "nft list ruleset > '$BAK_DIR/nftables.$stamp' 2>/dev/null || true"
-    fi
-}
+    bak_firewall() {
+        echo "--- 备份防火墙规则 ---"
+        run mkdir -p "$BAK_DIR"
+        local stamp
+        stamp=$(date +%Y%m%d-%H%M%S)
+        if command -v iptables-save >/dev/null 2>&1; then
+            run bash -c "iptables-save > '$BAK_DIR/iptables.$stamp' 2>/dev/null"
+            run bash -c "ip6tables-save > '$BAK_DIR/ip6tables.$stamp' 2>/dev/null || true"
+            ok "iptables 规则已备份到 $BAK_DIR (iptables.$stamp)"
+        fi
+        if command -v nft >/dev/null 2>&1; then
+            run bash -c "nft list ruleset > '$BAK_DIR/nftables.$stamp' 2>/dev/null || true"
+        fi
+    }
 fi
 
 # ———————— 仅删除 vpnplus 自己的独立链（不碰第三方规则） ————————
 # 关键改进：不 grep INPUT 链全局匹配删除，只处理 ACVPN_* 命名链。
 if ! declare -F clean_chains >/dev/null 2>&1; then
-clean_chains() {
-    echo "--- 清理 vpnplus 独立防火墙链 ---"
-    # 1) 先从主链移除 vpnplus 的跳转规则（精确匹配 jump 到命名链，绝不误伤其他规则）
-    run iptables -D INPUT -j "$CHAIN_ANTIPROBE" 2>/dev/null
-    run iptables -D INPUT -j "$CHAIN_RSS" 2>/dev/null
-    run iptables -t nat -D PREROUTING -j "$CHAIN_PORTHOP" 2>/dev/null
-    # IPv6 对称
-    if command -v ip6tables >/dev/null 2>&1; then
-        run ip6tables -D INPUT -j "$CHAIN_ANTIPROBE" 2>/dev/null
-        run ip6tables -t nat -D PREROUTING -j "$CHAIN_PORTHOP" 2>/dev/null
-    fi
+    clean_chains() {
+        echo "--- 清理 vpnplus 独立防火墙链 ---"
+        # 1) 先从主链移除 vpnplus 的跳转规则（精确匹配 jump 到命名链，绝不误伤其他规则）
+        run iptables -D INPUT -j "$CHAIN_ANTIPROBE" 2>/dev/null
+        run iptables -D INPUT -j "$CHAIN_RSS" 2>/dev/null
+        run iptables -t nat -D PREROUTING -j "$CHAIN_PORTHOP" 2>/dev/null
+        # IPv6 对称
+        if command -v ip6tables >/dev/null 2>&1; then
+            run ip6tables -D INPUT -j "$CHAIN_ANTIPROBE" 2>/dev/null
+            run ip6tables -t nat -D PREROUTING -j "$CHAIN_PORTHOP" 2>/dev/null
+        fi
 
-    # 2) flush 并删除命名链
-    run iptables -F "$CHAIN_ANTIPROBE" 2>/dev/null
-    run iptables -X "$CHAIN_ANTIPROBE" 2>/dev/null
-    run iptables -F "$CHAIN_RSS" 2>/dev/null
-    run iptables -X "$CHAIN_RSS" 2>/dev/null
-    run iptables -t nat -F "$CHAIN_PORTHOP" 2>/dev/null
-    run iptables -t nat -X "$CHAIN_PORTHOP" 2>/dev/null
-    if command -v ip6tables >/dev/null 2>&1; then
-        run ip6tables -F "$CHAIN_ANTIPROBE" 2>/dev/null
-        run ip6tables -X "$CHAIN_ANTIPROBE" 2>/dev/null
-        run ip6tables -t nat -F "$CHAIN_PORTHOP" 2>/dev/null
-        run ip6tables -t nat -X "$CHAIN_PORTHOP" 2>/dev/null
-    fi
+        # 2) flush 并删除命名链
+        run iptables -F "$CHAIN_ANTIPROBE" 2>/dev/null
+        run iptables -X "$CHAIN_ANTIPROBE" 2>/dev/null
+        run iptables -F "$CHAIN_RSS" 2>/dev/null
+        run iptables -X "$CHAIN_RSS" 2>/dev/null
+        run iptables -t nat -F "$CHAIN_PORTHOP" 2>/dev/null
+        run iptables -t nat -X "$CHAIN_PORTHOP" 2>/dev/null
+        if command -v ip6tables >/dev/null 2>&1; then
+            run ip6tables -F "$CHAIN_ANTIPROBE" 2>/dev/null
+            run ip6tables -X "$CHAIN_ANTIPROBE" 2>/dev/null
+            run ip6tables -t nat -F "$CHAIN_PORTHOP" 2>/dev/null
+            run ip6tables -t nat -X "$CHAIN_PORTHOP" 2>/dev/null
+        fi
 
-    # 3) 兜底：若旧版遗留了分散的 nat 端口跳跃规则（40000:42000/43000:45000）也精确按目标端口清理，
-    #    但仅匹配 vpnplus/ACVPN 特有的端口范围 DNAT/REDIRECT，依旧不动其他规则。
-    #    （2026-08-24 HK 实测：sing-box 旧配置还会留下 REDIRECT 40000:41000 型重复规则，同样会截胡跳跃段流量）
-    #    注意：grep 无匹配 rc=1，在 set -e + pipefail 下会直接杀掉脚本（2026-08-27 HK 实测 dry-run 中断于此），
-    #    整段用 || true 兜底：无匹配=无需清理，属正常路径而非错误
-    command -v iptables >/dev/null 2>&1 && {
-        iptables -t nat -L PREROUTING --line-numbers -n 2>/dev/null |
-          grep -E '(DNAT|REDIRECT).*dpts:(40000:42000|43000:45000|40000:41000|43000:44000) ' |
-          awk '{print $1}' | sort -rn | while read -r num; do
-            run iptables -t nat -D PREROUTING "$num"
-        done
-    } || true
-    ok "独立防火墙链已清理（未触碰第三方规则）"
-}
+        # 3) 兜底：若旧版遗留了分散的 nat 端口跳跃规则（40000:42000/43000:45000）也精确按目标端口清理，
+        #    但仅匹配 vpnplus/ACVPN 特有的端口范围 DNAT/REDIRECT，依旧不动其他规则。
+        #    （2026-08-24 HK 实测：sing-box 旧配置还会留下 REDIRECT 40000:41000 型重复规则，同样会截胡跳跃段流量）
+        #    注意：grep 无匹配 rc=1，在 set -e + pipefail 下会直接杀掉脚本（2026-08-27 HK 实测 dry-run 中断于此），
+        #    整段用 || true 兜底：无匹配=无需清理，属正常路径而非错误
+        command -v iptables >/dev/null 2>&1 && {
+            iptables -t nat -L PREROUTING --line-numbers -n 2>/dev/null |
+                grep -E '(DNAT|REDIRECT).*dpts:(40000:42000|43000:45000|40000:41000|43000:44000) ' |
+                awk '{print $1}' | sort -rn | while read -r num; do
+                run iptables -t nat -D PREROUTING "$num"
+            done
+        } || true
+        ok "独立防火墙链已清理（未触碰第三方规则）"
+    }
 fi
 
 # ———————— 1-5：停止服务 / 杀进程 / 清 crontab / 删 unit / 删目录 ————————
@@ -135,10 +147,12 @@ stop_services() {
     echo "--- 停止服务 ---"
     for svc in sing-box cloudflared cloudflared-update acvpn-rss vpnplus-net-tuning; do
         if systemctl is-active "$svc" &>/dev/null; then
-            run systemctl stop "$svc" || true; ok "已停止服务: $svc"
+            run systemctl stop "$svc" || true
+            ok "已停止服务: $svc"
         fi
         if systemctl is-enabled "$svc" &>/dev/null; then
-            run systemctl disable "$svc" || true; ok "已禁用服务: $svc"
+            run systemctl disable "$svc" || true
+            ok "已禁用服务: $svc"
         fi
     done
     if systemctl is-active cloudflared-update.timer &>/dev/null; then
@@ -155,7 +169,8 @@ kill_procs() {
     # 临时 Argo 隧道统一匹配口径（与 deploy_singbox keepalive 一致：cloudflared + tunnel + --url）
     for proc in sing-box 'cloudflared.*tunnel.*--url'; do
         if pgrep -f "$proc" &>/dev/null; then
-            run pkill -9 -f "$proc" || true; ok "已终止: $proc"
+            run pkill -9 -f "$proc" || true
+            ok "已终止: $proc"
         fi
     done
 }
@@ -168,7 +183,7 @@ kill_sub_httpd() {
     [ -n "$port" ] || return 0
     pids=$(ss -tlnp 2>/dev/null | grep ":$port " | grep -oE 'pid=[0-9]+' | sed 's/pid=//' | sort -u || true)
     for p in $pids; do
-        if tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -qE 'busybox[[:space:]]+httpd.*(/root/websbox|subport.log)'; then
+        if tr '\0' ' ' <"/proc/$p/cmdline" 2>/dev/null | grep -qE 'busybox[[:space:]]+httpd.*(/root/websbox|subport.log)'; then
             run kill -TERM "$p" || true
             ok "已终止 vpnplus 订阅 httpd (PID $p, 端口 $port)"
         fi
@@ -184,7 +199,8 @@ clean_crontab() {
         if $DRY_RUN; then
             info "[dry-run] 过滤 crontab（移除 ${BEFORE} 行中的 sb 相关条目）"
         elif [ -z "$NEW_CRON" ]; then
-            crontab -r 2>/dev/null || true; ok "crontab 已整体清空"
+            crontab -r 2>/dev/null || true
+            ok "crontab 已整体清空"
         else
             printf '%s\n' "$NEW_CRON" | crontab - 2>/dev/null || warn "crontab 写入失败，请手动检查 crontab -e"
         fi
@@ -200,21 +216,22 @@ rm_units() {
     echo "--- 清理 systemd units ---"
     local COUNT=0 unit
     for unit in /etc/systemd/system/sing-box.service \
-                /etc/systemd/system/sing-box.service.d \
-                /etc/systemd/system/sb.service \
-                /etc/systemd/system/sb.service.d \
-                /etc/systemd/system/xr.service \
-                /etc/systemd/system/xr.service.d \
-                /etc/systemd/system/cloudflared.service \
-                /etc/systemd/system/cloudflared-update.service \
-                /etc/systemd/system/cloudflared-update.timer \
-                /etc/systemd/system/acvpn-rss.service \
-                /etc/systemd/system/vpnplus-net-tuning.service \
-                /etc/systemd/system/vpnplus-netfilter-restore.service; do
+        /etc/systemd/system/sing-box.service.d \
+        /etc/systemd/system/sb.service \
+        /etc/systemd/system/sb.service.d \
+        /etc/systemd/system/xr.service \
+        /etc/systemd/system/xr.service.d \
+        /etc/systemd/system/cloudflared.service \
+        /etc/systemd/system/cloudflared-update.service \
+        /etc/systemd/system/cloudflared-update.timer \
+        /etc/systemd/system/acvpn-rss.service \
+        /etc/systemd/system/vpnplus-net-tuning.service \
+        /etc/systemd/system/vpnplus-netfilter-restore.service; do
         if [ -e "$unit" ]; then
             # 只删除明确属于 vpnplus/旧 ACVPN 的 unit；不因同名而删除其他 cloudflared 服务。
             if [ "$(basename "$unit")" = "acvpn-rss.service" ] || [ "$(basename "$unit")" = "sb.service" ] || [ "$(basename "$unit")" = "xr.service" ] || [ -d "$unit" ] || grep -qE '/etc/s-box|/root/websbox|vpnplus|ACVPN|ENABLE_DEPRECATED' "$unit" 2>/dev/null; then
-                run rm -rf "$unit"; COUNT=$((COUNT + 1))
+                run rm -rf "$unit"
+                COUNT=$((COUNT + 1))
             else
                 warn "保留未确认归属的 unit: $unit"
             fi
@@ -228,23 +245,28 @@ rm_files() {
     echo "--- 清理文件和目录 ---"
     local COUNT=0
     for path in /etc/s-box /usr/bin/sb /root/websbox \
-                /usr/local/sbin/acvpn-argo-keepalive.sh \
-                /usr/local/sbin/vpnplus-argo-keepalive.sh \
-                /usr/local/sbin/vpnplus-net-tuning.sh \
-                /var/lock/vpnplus-argo-keepalive.lock \
-                /etc/iptables/rules.v4 /etc/iptables/rules.v6 \
-                /etc/logrotate.d/vpnplus \
-                /var/log/vpnplus-optimize.log \
-                /var/log/vpnplus-optimize-manifest.log \
-                /var/log/vpnplus-singbox-manifest.log \
-                /var/log/vpnplus-sbfeed.log; do
+        /usr/local/sbin/acvpn-argo-keepalive.sh \
+        /usr/local/sbin/vpnplus-argo-keepalive.sh \
+        /usr/local/sbin/vpnplus-net-tuning.sh \
+        /var/lock/vpnplus-argo-keepalive.lock \
+        /etc/iptables/rules.v4 /etc/iptables/rules.v6 \
+        /etc/logrotate.d/vpnplus \
+        /var/log/vpnplus-optimize.log \
+        /var/log/vpnplus-optimize-manifest.log \
+        /var/log/vpnplus-singbox-manifest.log \
+        /var/log/vpnplus-sbfeed.log; do
         if [ -e "$path" ]; then
-            run rm -rf "$path"; COUNT=$((COUNT + 1)); ok "已删除: $path"
+            run rm -rf "$path"
+            COUNT=$((COUNT + 1))
+            ok "已删除: $path"
         fi
     done
     for mark in /etc/.ACVPN-optimized /etc/.ACVPN-singbox /etc/.vpnplus-optimized /etc/.vpnplus-singbox; do
         # 注意：[ -f ] && {...} 独立成句时，文件不存在=整句 rc=1，set -e 会杀脚本（2026-08-27 HK 实测），必须 || true
-        if [ -f "$mark" ]; then run rm -f "$mark"; ok "已删除标记: $mark"; fi
+        if [ -f "$mark" ]; then
+            run rm -f "$mark"
+            ok "已删除标记: $mark"
+        fi
     done
     if [ $COUNT -eq 0 ]; then info "无 sb 文件需清理"; fi
 }
@@ -254,9 +276,12 @@ clean_sysctl() {
     echo "--- 清理系统已应用参数（不改动第三方配置） ---"
     # 我们只移除脚本文档明确自己写入的 sysctl.d 文件（若仍存在）
     for f in /etc/sysctl.d/99-ACVPN-security.conf /etc/sysctl.d/99-ACVPN-brutal.conf \
-             /etc/sysctl.d/99-vpnplus-security.conf /etc/sysctl.d/99-vpnplus-brutal.conf; do
+        /etc/sysctl.d/99-vpnplus-security.conf /etc/sysctl.d/99-vpnplus-brutal.conf; do
         # 同上：if 形式防 set -e 在文件不存在时杀脚本
-        if [ -f "$f" ]; then run rm -f "$f"; ok "已删除 sysctl 文件: $f"; fi
+        if [ -f "$f" ]; then
+            run rm -f "$f"
+            ok "已删除 sysctl 文件: $f"
+        fi
     done
     /etc/init.d/procps restart >/dev/null 2>&1 || sysctl --system >/dev/null 2>&1 || true
 }
@@ -286,26 +311,78 @@ verify_clean() {
     echo "  验证清理结果"
     echo "========================================="
     local PASS=0 FAIL=0
-    if ! systemctl is-active sing-box &>/dev/null && [ ! -f /etc/systemd/system/sing-box.service ]; then ok "sing-box 服务已清除"; PASS=$((PASS+1)); else warn "sing-box 服务仍存在"; FAIL=$((FAIL+1)); fi
-    if [ ! -d /etc/systemd/system/sing-box.service.d ] && [ ! -f /etc/systemd/system/sing-box.service.d/99-vpnplus.conf ]; then ok "sing-box drop-in 已清除（无 legacy env 残留）"; PASS=$((PASS+1)); else warn "sing-box.service.d drop-in 残留"; FAIL=$((FAIL+1)); fi
-    [ ! -d /etc/s-box ] && { ok "/etc/s-box 已删除"; PASS=$((PASS+1)); } || { warn "/etc/s-box 仍存在"; FAIL=$((FAIL+1)); }
-    if ! ls /var/log/vpnplus-*.log >/dev/null 2>&1; then ok "vpnplus 日志已清除（无 IP/token 残留）"; PASS=$((PASS+1)); else warn "vpnplus 日志仍存在"; FAIL=$((FAIL+1)); fi
-    if [ ! -f /etc/systemd/system/sb.service ] && [ ! -f /etc/systemd/system/xr.service ]; then ok "sb/xr 兼容服务已清除"; PASS=$((PASS+1)); else warn "sb.service/xr.service 残留"; FAIL=$((FAIL+1)); fi
-    [ ! -f /etc/systemd/system/vpnplus-netfilter-restore.service ] && { ok "vpnplus-netfilter-restore.service 已删除"; PASS=$((PASS+1)); } || { warn "vpnplus-netfilter-restore.service 仍存在"; FAIL=$((FAIL+1)); }
-    [ ! -f /usr/local/sbin/vpnplus-argo-keepalive.sh ] && { ok "Argo 保活脚本已删除"; PASS=$((PASS+1)); } || { warn "vpnplus-argo-keepalive.sh 仍存在"; FAIL=$((FAIL+1)); }
-    if iptables -L "$CHAIN_ANTIPROBE" -n >/dev/null 2>&1 || iptables -t nat -L "$CHAIN_PORTHOP" -n >/dev/null 2>&1; then
-        warn "vpnplus 独立防火墙链仍存在"; FAIL=$((FAIL+1))
+    if ! systemctl is-active sing-box &>/dev/null && [ ! -f /etc/systemd/system/sing-box.service ]; then
+        ok "sing-box 服务已清除"
+        PASS=$((PASS + 1))
     else
-        ok "vpnplus 独立防火墙链已清除"; PASS=$((PASS+1))
+        warn "sing-box 服务仍存在"
+        FAIL=$((FAIL + 1))
+    fi
+    if [ ! -d /etc/systemd/system/sing-box.service.d ] && [ ! -f /etc/systemd/system/sing-box.service.d/99-vpnplus.conf ]; then
+        ok "sing-box drop-in 已清除（无 legacy env 残留）"
+        PASS=$((PASS + 1))
+    else
+        warn "sing-box.service.d drop-in 残留"
+        FAIL=$((FAIL + 1))
+    fi
+    [ ! -d /etc/s-box ] && {
+        ok "/etc/s-box 已删除"
+        PASS=$((PASS + 1))
+    } || {
+        warn "/etc/s-box 仍存在"
+        FAIL=$((FAIL + 1))
+    }
+    if ! ls /var/log/vpnplus-*.log >/dev/null 2>&1; then
+        ok "vpnplus 日志已清除（无 IP/token 残留）"
+        PASS=$((PASS + 1))
+    else
+        warn "vpnplus 日志仍存在"
+        FAIL=$((FAIL + 1))
+    fi
+    if [ ! -f /etc/systemd/system/sb.service ] && [ ! -f /etc/systemd/system/xr.service ]; then
+        ok "sb/xr 兼容服务已清除"
+        PASS=$((PASS + 1))
+    else
+        warn "sb.service/xr.service 残留"
+        FAIL=$((FAIL + 1))
+    fi
+    [ ! -f /etc/systemd/system/vpnplus-netfilter-restore.service ] && {
+        ok "vpnplus-netfilter-restore.service 已删除"
+        PASS=$((PASS + 1))
+    } || {
+        warn "vpnplus-netfilter-restore.service 仍存在"
+        FAIL=$((FAIL + 1))
+    }
+    [ ! -f /usr/local/sbin/vpnplus-argo-keepalive.sh ] && {
+        ok "Argo 保活脚本已删除"
+        PASS=$((PASS + 1))
+    } || {
+        warn "vpnplus-argo-keepalive.sh 仍存在"
+        FAIL=$((FAIL + 1))
+    }
+    if iptables -L "$CHAIN_ANTIPROBE" -n >/dev/null 2>&1 || iptables -t nat -L "$CHAIN_PORTHOP" -n >/dev/null 2>&1; then
+        warn "vpnplus 独立防火墙链仍存在"
+        FAIL=$((FAIL + 1))
+    else
+        ok "vpnplus 独立防火墙链已清除"
+        PASS=$((PASS + 1))
     fi
     if crontab -l 2>/dev/null | grep -qE 'vpnplus-argo-keepalive|acvpn-argo-keepalive|/usr/bin/sb|busybox httpd.*(/root/websbox|subport.log)' 2>/dev/null; then
-        warn "crontab 残留 sb 条目"; FAIL=$((FAIL+1))
+        warn "crontab 残留 sb 条目"
+        FAIL=$((FAIL + 1))
     else
-        ok "crontab 无 sb 条目"; PASS=$((PASS+1))
+        ok "crontab 无 sb 条目"
+        PASS=$((PASS + 1))
     fi
     # 注意：pgrep -c 会把自己的 shell 也算进 /bin/bash 匹配，用 -f + 精确进程名排除干扰
     remaining=$(pgrep -f 'sing-box|cloudflared.*tunnel.*--url' 2>/dev/null | wc -l)
-    if [ "$remaining" -eq 0 ]; then ok "进程已清理"; PASS=$((PASS+1)); else warn "仍有 ${remaining} 个进程"; FAIL=$((FAIL+1)); fi
+    if [ "$remaining" -eq 0 ]; then
+        ok "进程已清理"
+        PASS=$((PASS + 1))
+    else
+        warn "仍有 ${remaining} 个进程"
+        FAIL=$((FAIL + 1))
+    fi
 
     echo ""
     echo "========================================="

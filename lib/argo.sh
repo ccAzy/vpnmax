@@ -66,7 +66,10 @@ ensure_argo_extra_applied() {
     _need=""
     for _tok in --edge-ip-version --region --edge-bind-address; do
         _v=$(echo "$want_run" | grep -oE -- "$_tok [^ ]+" | head -1 || true)
-        if [ -n "$_v" ] && ! echo "$cur_run" | grep -qF -- "$_v"; then _missing=1; _need="$_need $_v"; fi
+        if [ -n "$_v" ] && ! echo "$cur_run" | grep -qF -- "$_v"; then
+            _missing=1
+            _need="$_need $_v"
+        fi
     done
     if [ "$_missing" = 0 ]; then
         ok "运行隧道已带优选参数，无需对齐"

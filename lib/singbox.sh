@@ -28,7 +28,10 @@ sb_feed() { # sb_feed <超时秒数> - <<'KEYS'  ... KB: 用 stdin 传入按键
 fetch_sb_sh() { # $1=输出路径
     local out="$1" src="" d
     for d in "${SCRIPT_DIR:-.}/vendor" "./vendor" "$(dirname "${BASH_SOURCE[0]:-.}")/../vendor" "/usr/local/lib/vpnmax/vendor"; do
-        if [ -s "$d/sb.sh" ]; then src="$d/sb.sh"; break; fi
+        if [ -s "$d/sb.sh" ]; then
+            src="$d/sb.sh"
+            break
+        fi
     done
     if [ -n "$src" ]; then
         info "使用仓库自带 vendor/sb.sh（零上游调用）"

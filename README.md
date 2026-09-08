@@ -42,13 +42,13 @@ vpnplus 用来在 Debian/Ubuntu VPS 上快速部署代理节点，并自动完�
 ### 1. 准备环境
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnplus/main/bootstrap.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/bootstrap.sh)
 ```
 
 ### 2. 优化系统
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnplus/main/deploy_optimize.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_optimize.sh)
 ```
 
 这一步会：
@@ -90,7 +90,7 @@ bash deploy_optimize.sh VERSION_PIN=x.y.z
 服务器重启后重新 SSH 登录，再执行：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnplus/main/deploy_singbox.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_singbox.sh)
 ```
 
 脚本会自动安装 sing-box、生成订阅、配置端口跳跃、Argo、WARP 和防火墙规则。完成后会直接在终端打印订阅链接。
@@ -189,7 +189,7 @@ journalctl -u vpnplus-net-tuning.service --no-pager
 ```bash
 bash deploy_singbox.sh --force
 # 等价 rm -f /etc/.vpnplus-singbox && bash deploy_singbox.sh
-# 裸装：bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnplus/main/deploy_singbox.sh) --force
+# 裸装：bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_singbox.sh) --force
 ```
 
 旧写法 `rm -f /etc/.vpnplus-singbox && bash deploy_singbox.sh` 仍可用，`--force` 是同一逻辑的显式开关，会强制对齐 `sb.json/iptables/订阅` 三处（专治 `vi sb.json` 后被 `@reboot 9-1` 刷回来的岔裂）。

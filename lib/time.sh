@@ -9,8 +9,11 @@ VPNPLUS_TIME_LOADED=1
 # 依赖 lib/common.sh 的 info/ok/warn/manifest/run
 ensure_time_sync() {
     info "校准系统时间（chrony 国内源）..."
-    if ${DRY_RUN:-false}; then info "[dry-run] 将配置 chrony 并同步时间"; return 0; fi
-    cat > /etc/chrony/chrony.conf <<'CHRONY'
+    if ${DRY_RUN:-false}; then
+        info "[dry-run] 将配置 chrony 并同步时间"
+        return 0
+    fi
+    cat >/etc/chrony/chrony.conf <<'CHRONY'
 pool ntp.aliyun.com iburst
 pool ntp1.aliyun.com iburst
 pool cn.pool.ntp.org iburst

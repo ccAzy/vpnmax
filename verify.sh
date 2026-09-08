@@ -180,7 +180,11 @@ if echo "$_KVER" | grep -q 'bbrv3'; then
     PASS=$((PASS + 1))
 else warn "G5: 当前内核非 bbrv3 ($_KVER)，需跑 deploy_optimize.sh"; fi
 # G6：cloudflared 版本（pin 2026.8.3， drift 告警不强更）
-_CF_BIN=""; for _cb in /etc/s-box/cloudflared /usr/local/bin/cloudflared; do [ -x "$_cb" ] && { _CF_BIN="$_cb"; break; }; done
+_CF_BIN=""
+for _cb in /etc/s-box/cloudflared /usr/local/bin/cloudflared; do [ -x "$_cb" ] && {
+    _CF_BIN="$_cb"
+    break
+}; done
 if [ -n "$_CF_BIN" ]; then
     _CF_VER=$("$_CF_BIN" --version 2>/dev/null | grep -oE '20[0-9.]+' | head -1 || true)
     if [ "$_CF_VER" = "2026.8.3" ]; then

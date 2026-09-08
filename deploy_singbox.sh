@@ -122,7 +122,10 @@ run() {
 fetch_sb_sh() { # $1=输出路径
     local out="$1" src="" d
     for d in "${SCRIPT_DIR:-.}/vendor" "./vendor" "/usr/local/lib/vpnmax/vendor"; do
-        if [ -s "$d/sb.sh" ]; then src="$d/sb.sh"; break; fi
+        if [ -s "$d/sb.sh" ]; then
+            src="$d/sb.sh"
+            break
+        fi
     done
     if [ -n "$src" ]; then
         info "使用仓库自带 vendor/sb.sh（零上游调用）"
@@ -630,27 +633,27 @@ fi
 # ── Argo 隧道 ──
 # ── vpnmax 融合回退：边缘优选 + extra 对齐（与 lib/ 同逻辑，单文件自包含） ──
 if ! declare -F ensure_edge_prefer >/dev/null 2>&1; then
-ensure_edge_prefer() {
-    if [ "${EDGE_PREFER:-on}" = "off" ]; then
-        info "EDGE_PREFER=off，跳过边缘优选"
-        return 0
-    fi
-    if ${DRY_RUN:-false}; then
-        info "[dry-run] 将执行 CF 边缘优选（扫段→测延迟→写 argo-extra.conf）"
-        return 0
-    fi
-    command -v curl >/dev/null 2>&1 || {
-        warn "curl 缺失，跳过边缘优选"
-        return 0
-    }
-    local workdir="/tmp/vpnmax-edgeprefer"
-    run mkdir -p "$workdir" || return 0
-    info "CF 边缘优选：采样官方段测延迟（预算 90s）..."
+    ensure_edge_prefer() {
+        if [ "${EDGE_PREFER:-on}" = "off" ]; then
+            info "EDGE_PREFER=off，跳过边缘优选"
+            return 0
+        fi
+        if ${DRY_RUN:-false}; then
+            info "[dry-run] 将执行 CF 边缘优选（扫段→测延迟→写 argo-extra.conf）"
+            return 0
+        fi
+        command -v curl >/dev/null 2>&1 || {
+            warn "curl 缺失，跳过边缘优选"
+            return 0
+        }
+        local workdir="/tmp/vpnmax-edgeprefer"
+        run mkdir -p "$workdir" || return 0
+        info "CF 边缘优选：采样官方段测延迟（预算 90s）..."
 
-    # 官方段（cloudflare.com/ips-v4/v6，失败则用内置保底段）
-    local v4cidrs
-    v4cidrs=$(curl -fsSL --max-time 15 https://www.cloudflare.com/ips-v4 2>/dev/null | grep -E '^[0-9.]+/' | head -20 || true)
-    [ -z "$v4cidrs" ] && v4cidrs="173.245.48.0/20
+        # 官方段（cloudflare.com/ips-v4/v6，失败则用内置保底段）
+        local v4cidrs
+        v4cidrs=$(curl -fsSL --max-time 15 https://www.cloudflare.com/ips-v4 2>/dev/null | grep -E '^[0-9.]+/' | head -20 || true)
+        [ -z "$v4cidrs" ] && v4cidrs="173.245.48.0/20
 103.21.244.0/22
 103.22.200.0/22
 103.31.4.0/22
@@ -665,22 +668,22 @@ ensure_edge_prefer() {
 104.24.0.0/14
 172.64.0.0/13
 131.0.72.0/22"
-    # 每段取第 2 个可用 IP（.1 常为网关，取 .2 避开），限 15 段控制预算
-    local ips=""
-    ips=$(echo "$v4cidrs" | head -15 | while IFS=/ read -r net _bits; do
-        IFS=. read -r a b c d <<EOF2
+        # 每段取第 2 个可用 IP（.1 常为网关，取 .2 避开），限 15 段控制预算
+        local ips=""
+        ips=$(echo "$v4cidrs" | head -15 | while IFS=/ read -r net _bits; do
+            IFS=. read -r a b c d <<EOF2
 $net
 EOF2
-        echo "$a.$b.$c.$((d + 2))"
-    done)
-    # 有 v6 全局地址才测 v6 家族
-    local have_v6=""
-    ip -6 route get 2606:4700:4700::1111 2>/dev/null | grep -q 'via\|dev' && have_v6=1 || true
+            echo "$a.$b.$c.$((d + 2))"
+        done)
+        # 有 v6 全局地址才测 v6 家族
+        local have_v6=""
+        ip -6 route get 2606:4700:4700::1111 2>/dev/null | grep -q 'via\|dev' && have_v6=1 || true
 
-    # 并发探测：TCP 建连耗时 + trace 读 colo（与 CFData 同口径）
-    local result="$workdir/hits.txt"
-    : >"$result"
-    echo "$ips" | xargs -P 16 -I{} bash -c '
+        # 并发探测：TCP 建连耗时 + trace 读 colo（与 CFData 同口径）
+        local result="$workdir/hits.txt"
+        : >"$result"
+        echo "$ips" | xargs -P 16 -I{} bash -c '
         ip="$1"
         out=$(curl -s --resolve speed.cloudflare.com:443:"$ip" --max-time 4 -w "\n%{time_connect}|%{http_code}" https://speed.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)
         code=$(echo "$out" | tail -1 | cut -d"|" -f2)
@@ -690,102 +693,105 @@ EOF2
         [ -n "$colo" ] && [ -n "$lat" ] && echo "$lat $colo $ip" >> "'"$result"'"
     ' _ {} 2>/dev/null || true
 
-    if [ ! -s "$result" ]; then
-        warn "边缘优选无有效样本，保持 auto（网络可能受限）"
-        return 0
-    fi
-    # 最优 colo = 样本最多且延迟最低（先按延迟排序取前 1/3，再按出现次数投票）
-    local best_line best_lat best_colo best_ip
-    best_line=$(sort -n "$result" | head -5 | sort -k2 | uniq -c -f1 2>/dev/null | sort -rn | head -1 | awk '{print $2, $3, $4}' || true)
-    [ -z "$best_line" ] && best_line=$(sort -n "$result" | head -1)
-    best_lat=$(echo "$best_line" | awk '{print $1}')
-    best_colo=$(echo "$best_line" | awk '{print $2}')
-    best_ip=$(echo "$best_line" | awk '{print $3}')
-    [ -z "$best_colo" ] && {
-        warn "边缘优选解析失败，保持 auto"
-        return 0
-    }
+        if [ ! -s "$result" ]; then
+            warn "边缘优选无有效样本，保持 auto（网络可能受限）"
+            return 0
+        fi
+        # 最优 colo = 样本最多且延迟最低（先按延迟排序取前 1/3，再按出现次数投票）
+        local best_line best_lat best_colo best_ip
+        best_line=$(sort -n "$result" | head -5 | sort -k2 | uniq -c -f1 2>/dev/null | sort -rn | head -1 | awk '{print $2, $3, $4}' || true)
+        [ -z "$best_line" ] && best_line=$(sort -n "$result" | head -1)
+        best_lat=$(echo "$best_line" | awk '{print $1}')
+        best_colo=$(echo "$best_line" | awk '{print $2}')
+        best_ip=$(echo "$best_line" | awk '{print $3}')
+        [ -z "$best_colo" ] && {
+            warn "边缘优选解析失败，保持 auto"
+            return 0
+        }
 
-    # v4/v6 家族二选一：直连 region1 端点比握手（仅有 v6 时才测）
-    local family="4"
-    if [ -n "$have_v6" ]; then
-        local t4 t6
-        t4=$(curl -s -o /dev/null -w '%{time_connect}' --ipv4 --max-time 5 https://region1.v2.argotunnel.com/ 2>/dev/null || echo 9)
-        t6=$(curl -s -o /dev/null -w '%{time_connect}' --ipv6 --max-time 5 https://region1.v2.argotunnel.com/ 2>/dev/null || echo 9)
-        # shell 浮点比较：awk 判定
-        if awk "BEGIN{exit !(($t6+0) < ($t4+0) && ($t6+0) > 0)}" 2>/dev/null; then family="6"; fi
-        info "边缘家族实测 v4=${t4}s v6=${t6}s → 选 v$family"
-    fi
+        # v4/v6 家族二选一：直连 region1 端点比握手（仅有 v6 时才测）
+        local family="4"
+        if [ -n "$have_v6" ]; then
+            local t4 t6
+            t4=$(curl -s -o /dev/null -w '%{time_connect}' --ipv4 --max-time 5 https://region1.v2.argotunnel.com/ 2>/dev/null || echo 9)
+            t6=$(curl -s -o /dev/null -w '%{time_connect}' --ipv6 --max-time 5 https://region1.v2.argotunnel.com/ 2>/dev/null || echo 9)
+            # shell 浮点比较：awk 判定
+            if awk "BEGIN{exit !(($t6+0) < ($t4+0) && ($t6+0) > 0)}" 2>/dev/null; then family="6"; fi
+            info "边缘家族实测 v4=${t4}s v6=${t6}s → 选 v$family"
+        fi
 
-    # 落盘：argo-extra.conf（keepalive/自启隧道自动携带；sb 菜单启动的由 ensure_argo_extra_applied 对齐）
-    local extra="/etc/s-box/argo-extra.conf"
-    {
-        echo "# vpnmax 边缘优选（$(date -Is)）：最优 colo $best_colo @ ${best_lat}s via $best_ip"
-        echo -n "--edge-ip-version $family"
-        [ -n "${ARGO_REGION:-}" ] && echo -n " --region $ARGO_REGION"
-        echo ""
-    } >"$extra" 2>/dev/null || {
-        warn "argo-extra.conf 写入失败，优选结果仅记录日志"
+        # 落盘：argo-extra.conf（keepalive/自启隧道自动携带；sb 菜单启动的由 ensure_argo_extra_applied 对齐）
+        local extra="/etc/s-box/argo-extra.conf"
+        {
+            echo "# vpnmax 边缘优选（$(date -Is)）：最优 colo $best_colo @ ${best_lat}s via $best_ip"
+            echo -n "--edge-ip-version $family"
+            [ -n "${ARGO_REGION:-}" ] && echo -n " --region $ARGO_REGION"
+            echo ""
+        } >"$extra" 2>/dev/null || {
+            warn "argo-extra.conf 写入失败，优选结果仅记录日志"
+        }
+        {
+            echo "ts=$(date -Is) best_colo=$best_colo best_lat=${best_lat}s best_ip=$best_ip family=v$family region=${ARGO_REGION:-auto}"
+        } >>/etc/s-box/edge-prefer.log 2>/dev/null || true
+        manifest "edge-prefer colo=$best_colo lat=${best_lat}s family=v$family"
+        ok "边缘优选完成：colo=$best_colo（${best_lat}s），家族 v$family"
+        rm -rf "$workdir" 2>/dev/null || true
     }
-    {
-        echo "ts=$(date -Is) best_colo=$best_colo best_lat=${best_lat}s best_ip=$best_ip family=v$family region=${ARGO_REGION:-auto}"
-    } >>/etc/s-box/edge-prefer.log 2>/dev/null || true
-    manifest "edge-prefer colo=$best_colo lat=${best_lat}s family=v$family"
-    ok "边缘优选完成：colo=$best_colo（${best_lat}s），家族 v$family"
-    rm -rf "$workdir" 2>/dev/null || true
-}
 fi
 if ! declare -F ensure_argo_extra_applied >/dev/null 2>&1; then
-ensure_argo_extra_applied() {
-    local extra="/etc/s-box/argo-extra.conf"
-    [ -s "$extra" ] || return 0
-    if ${DRY_RUN:-false}; then
-        info "[dry-run] 将对齐 argo-extra.conf 到运行隧道"
-        return 0
-    fi
-    local want_run cur_run
-    want_run=$(grep -v '^#' "$extra" 2>/dev/null | tr '\n' ' ' || true)
-    [ -z "$(echo "$want_run" | tr -d ' ')" ] && return 0
-    cur_run=$(pgrep -af 'cloudflared.*tunnel.*--url' 2>/dev/null | head -1 || true)
-    [ -z "$cur_run" ] && return 0
-    # 精确比对：extra 里的具体值必须出现在运行命令行里（同名不同值如 auto 也算缺失）。
-    local _missing=0 _need="" _tok _v
-    for _tok in --edge-ip-version --region --edge-bind-address; do
-        _v=$(echo "$want_run" | grep -oE -- "$_tok [^ ]+" | head -1 || true)
-        if [ -n "$_v" ] && ! echo "$cur_run" | grep -qF -- "$_v"; then _missing=1; _need="$_need $_v"; fi
-    done
-    if [ "$_missing" = 0 ]; then
-        ok "运行隧道已带优选参数，无需对齐"
-        return 0
-    fi
-    info "运行隧道缺优选参数 ($_need)，受控重启一次带上..."
-    local wsport
-    wsport=$(jq -r '[.inbounds[] | select(.type=="vless" and .transport.type=="ws") | .listen_port][0] // empty' /etc/s-box/sb.json 2>/dev/null)
-    [ -n "$wsport" ] && [ "$wsport" != "null" ] || wsport=$(jq -r '.inbounds[1].listen_port // empty' /etc/s-box/sb.json 2>/dev/null)
-    [ -n "$wsport" ] || {
-        warn "WS 端口解析失败，跳过对齐"
-        return 0
+    ensure_argo_extra_applied() {
+        local extra="/etc/s-box/argo-extra.conf"
+        [ -s "$extra" ] || return 0
+        if ${DRY_RUN:-false}; then
+            info "[dry-run] 将对齐 argo-extra.conf 到运行隧道"
+            return 0
+        fi
+        local want_run cur_run
+        want_run=$(grep -v '^#' "$extra" 2>/dev/null | tr '\n' ' ' || true)
+        [ -z "$(echo "$want_run" | tr -d ' ')" ] && return 0
+        cur_run=$(pgrep -af 'cloudflared.*tunnel.*--url' 2>/dev/null | head -1 || true)
+        [ -z "$cur_run" ] && return 0
+        # 精确比对：extra 里的具体值必须出现在运行命令行里（同名不同值如 auto 也算缺失）。
+        local _missing=0 _need="" _tok _v
+        for _tok in --edge-ip-version --region --edge-bind-address; do
+            _v=$(echo "$want_run" | grep -oE -- "$_tok [^ ]+" | head -1 || true)
+            if [ -n "$_v" ] && ! echo "$cur_run" | grep -qF -- "$_v"; then
+                _missing=1
+                _need="$_need $_v"
+            fi
+        done
+        if [ "$_missing" = 0 ]; then
+            ok "运行隧道已带优选参数，无需对齐"
+            return 0
+        fi
+        info "运行隧道缺优选参数 ($_need)，受控重启一次带上..."
+        local wsport
+        wsport=$(jq -r '[.inbounds[] | select(.type=="vless" and .transport.type=="ws") | .listen_port][0] // empty' /etc/s-box/sb.json 2>/dev/null)
+        [ -n "$wsport" ] && [ "$wsport" != "null" ] || wsport=$(jq -r '.inbounds[1].listen_port // empty' /etc/s-box/sb.json 2>/dev/null)
+        [ -n "$wsport" ] || {
+            warn "WS 端口解析失败，跳过对齐"
+            return 0
+        }
+        local cfbin
+        cfbin=$(command -v cloudflared 2>/dev/null)
+        [ -x "${cfbin:-}" ] || cfbin=$(ls /etc/s-box/cloudflared /usr/local/bin/cloudflared 2>/dev/null | head -1)
+        [ -x "${cfbin:-}" ] || {
+            warn "cloudflared 缺失，跳过对齐"
+            return 0
+        }
+        pkill -x cloudflared 2>/dev/null || true
+        sleep 3
+        # shellcheck disable=SC2086
+        nohup "$cfbin" tunnel --url "http://localhost:$wsport" --no-autoupdate --protocol auto $want_run >/etc/s-box/argo.log 2>&1 &
+        sleep 20
+        local cnt
+        cnt=$(pgrep -c -x cloudflared 2>/dev/null || echo 0)
+        if [ "$cnt" -eq 1 ] && grep -ao 'https://[a-z0-9.-]*\.trycloudflare\.com' /etc/s-box/argo.log 2>/dev/null | tail -1 | grep -q .; then
+            ok "隧道已带优选参数重启（单实例，域名已更新，订阅由 keepalive L3 同步）"
+        else
+            warn "对齐后隧道异常（进程数 $cnt），keepalive 下轮自动修复"
+        fi
     }
-    local cfbin
-    cfbin=$(command -v cloudflared 2>/dev/null)
-    [ -x "${cfbin:-}" ] || cfbin=$(ls /etc/s-box/cloudflared /usr/local/bin/cloudflared 2>/dev/null | head -1)
-    [ -x "${cfbin:-}" ] || {
-        warn "cloudflared 缺失，跳过对齐"
-        return 0
-    }
-    pkill -x cloudflared 2>/dev/null || true
-    sleep 3
-    # shellcheck disable=SC2086
-    nohup "$cfbin" tunnel --url "http://localhost:$wsport" --no-autoupdate --protocol auto $want_run >/etc/s-box/argo.log 2>&1 &
-    sleep 20
-    local cnt
-    cnt=$(pgrep -c -x cloudflared 2>/dev/null || echo 0)
-    if [ "$cnt" -eq 1 ] && grep -ao 'https://[a-z0-9.-]*\.trycloudflare\.com' /etc/s-box/argo.log 2>/dev/null | tail -1 | grep -q .; then
-        ok "隧道已带优选参数重启（单实例，域名已更新，订阅由 keepalive L3 同步）"
-    else
-        warn "对齐后隧道异常（进程数 $cnt），keepalive 下轮自动修复"
-    fi
-}
 fi
 if ! declare -F start_argo >/dev/null 2>&1; then
     start_argo() {
@@ -1396,7 +1402,7 @@ main() {
         ok "sing-box 已部署运行中，跳过安装。"
         info "如需强制重跑并对齐 sb.json/iptables/订阅三处："
         info "  本地已有脚本: bash deploy_singbox.sh --force"
-        info "  一键裸装: bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnplus/main/deploy_singbox.sh) --force"
+        info "  一键裸装: bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_singbox.sh) --force"
         return 0
     fi
     if [ "$FORCE" = "true" ]; then
