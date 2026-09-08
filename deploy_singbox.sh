@@ -95,7 +95,7 @@ MANIFEST="/var/log/vpnmax-singbox-manifest.log"
 # 锁定的 sb.sh（vpnmax 融合：仓库自带 vendor/sb.sh，与 ccAzy/sing-box-yg acvpn 分支
 # 2026-08-05 提交字节一致；SB_URL 仅为 vendor 缺失时的自家回退，绝不指向上游）
 SB_COMMIT="5001e76efc9e15eac1f8ff33a0b389172e331e1d"
-SB_SHA256="65113dd45eba3bb377e71e89f01d77d84537757771802898acc6e60f36bf06be"
+SB_SHA256="46faf59b755350438a362b349c1b01af9edcdbcc69e4424f2af2188413803c77"
 SB_URL="https://raw.githubusercontent.com/ccAzy/vpnmax/main/vendor/sb.sh"
 
 RED='\033[0;31m'

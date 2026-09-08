@@ -310,7 +310,14 @@ readp "请选择【1-2】：" menu
 if [ -z "$menu" ] || [ "$menu" = "1" ] ; then
 zqzs
 else
+# vpnmax: 优先使用 vendor 本地 acme.sh
+_vendor_acme="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" 2>/dev/null || echo ".")/vendor/acme.sh"
+if [ -s "$_vendor_acme" ]; then
+bash "$_vendor_acme"
+else
+yellow "vendor 缺失 acme.sh，回退上游下载（非 vpnmax 推荐模式）"
 bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/acme-yg/main/acme.sh)
+fi
 if [[ ! -f /root/ygkkkca/cert.crt && ! -f /root/ygkkkca/private.key && ! -s /root/ygkkkca/cert.crt && ! -s /root/ygkkkca/private.key ]]; then
 red "Acme证书申请失败，继续使用自签证书" 
 zqzs
@@ -3834,18 +3841,19 @@ rm /tmp/crontab.tmp
 }
 
 lnsb(){
-rm -rf /usr/bin/sb
-curl -L -o /usr/bin/sb -# --retry 2 --insecure https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/sb.sh
-chmod +x /usr/bin/sb
+# vpnmax: 禁止从上游覆盖 vendor 版本，防供应链劫持
+green "vpnmax 模式：sb 脚本由 vendor/sb.sh 锁定，跳过上游更新"
+return 0
 }
 
 upsbyg(){
+# vpnmax: 禁止 sb.sh 自更新，版本由 SB_COMMIT/SB_SHA256 锁定
 if [[ ! -f '/usr/bin/sb' ]]; then
 red "未正常安装Sing-box-yg" && exit
 fi
-lnsb
-curl -sL https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/version | awk -F "更新内容" '{print $1}' | head -n 1 > /etc/s-box/v
-green "Sing-box-yg安装脚本升级成功" && sleep 5 && sb
+green "vpnmax 模式：sb 脚本由 vendor/sb.sh 锁定（commit ${SB_COMMIT:-unknown}），跳过上游更新"
+sleep 2
+sb
 }
 
 lapre(){
@@ -4023,19 +4031,38 @@ fi
 }
 
 acme(){
-#bash <(curl -Ls https://gitlab.com/rwkgyg/acme-script/raw/main/acme.sh)
+# vpnmax: 优先使用 vendor 本地 acme.sh
+_vendor_acme="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" 2>/dev/null || echo ".")/vendor/acme.sh"
+if [ -s "$_vendor_acme" ]; then
+bash "$_vendor_acme"
+else
+yellow "vendor 缺失 acme.sh，回退上游下载（非 vpnmax 推荐模式）"
 bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/acme-yg/main/acme.sh)
+fi
 }
 cfwarp(){
-#bash <(curl -Ls https://gitlab.com/rwkgyg/CFwarp/raw/main/CFwarp.sh)
+# vpnmax: 优先使用 vendor 本地 CFwarp.sh
+_vendor_cfwarp="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" 2>/dev/null || echo ".")/vendor/CFwarp.sh"
+if [ -s "$_vendor_cfwarp" ]; then
+bash "$_vendor_cfwarp"
+else
+yellow "vendor 缺失 CFwarp.sh，回退上游下载（非 vpnmax 推荐模式）"
 bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/warp-yg/main/CFwarp.sh)
+fi
 }
 bbr(){
 if [[ $vi =~ lxc|openvz ]]; then
 yellow "当前VPS的架构为 $vi，不支持开启原版BBR加速" && sleep 2 && exit 
 else
 green "点击任意键，即可开启BBR加速，ctrl+c退出"
+# vpnmax: 优先使用 vendor 本地 bbr.sh
+_vendor_bbr="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" 2>/dev/null || echo ".")/vendor/bbr.sh"
+if [ -s "$_vendor_bbr" ]; then
+bash "$_vendor_bbr"
+else
+yellow "vendor 缺失 bbr.sh，回退上游下载（非 vpnmax 推荐模式）"
 bash <(curl -Ls https://raw.githubusercontent.com/teddysun/across/master/bbr.sh)
+fi
 fi
 }
 
@@ -4163,8 +4190,17 @@ case $(uname -m) in
 aarch64) cpu=arm64;;
 x86_64) cpu=amd64;;
 esac
+# vpnmax: 优先使用 vendor 本地 sbwpph，SHA256 校验
+_vendor_sbwpph="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" 2>/dev/null || echo ".")/vendor/sbwpph_${cpu}"
+if [ -s "$_vendor_sbwpph" ]; then
+cp -f "$_vendor_sbwpph" /etc/s-box/sbwpph
+chmod +x /etc/s-box/sbwpph
+green "使用 vendor 本地 sbwpph_${cpu}"
+else
+yellow "vendor 缺失 sbwpph_${cpu}，回退上游下载（非 vpnmax 推荐模式）"
 curl -L -o /etc/s-box/sbwpph -# --retry 2 --insecure https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/sbwpph_$cpu
 chmod +x /etc/s-box/sbwpph
+fi
 fi
 ps -ef | grep '[s]bwpph' | awk '{print $2}' | xargs kill 2>/dev/null
 v4v6
