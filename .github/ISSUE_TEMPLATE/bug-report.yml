@@ -1,0 +1,85 @@
+name: Bug report
+description: 报告一个 bug，帮助 vpnmax 变得更好
+title: "[BUG] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢你提交 Bug 报告！请填写以下信息，帮助我们快速定位问题。
+
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统
+      placeholder: "如 Debian 12 / Ubuntu 22.04"
+    validations:
+      required: true
+
+  - type: input
+    id: arch
+    attributes:
+      label: 架构
+      placeholder: "如 x86_64 / aarch64"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: vpnmax 版本
+      description: "运行 `git log -1 --oneline` 获取"
+      placeholder: "如 a73e4eb fix: ..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: 安装方式
+      options:
+        - 一键脚本
+        - 手动
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug 描述
+      description: 简洁描述你遇到的问题
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 详细描述如何触发这个 bug
+      value: |
+        1. 执行 `bash xxx.sh`
+        2. 输入 `...`
+        3. 看到错误
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+      description: 你期望发生什么
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: 贴上报错日志
+      render: shell
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 额外信息
+      description: 任何你觉得有用的信息（截图、配置文件、相关 Issue 链接等）

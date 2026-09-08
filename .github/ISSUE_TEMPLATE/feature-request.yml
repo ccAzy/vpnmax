@@ -1,0 +1,32 @@
+name: Feature request
+description: 提一个功能建议
+title: "[FEATURE] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你的问题
+      description: 你遇到了什么问题，或者你想实现什么功能？
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: 期望的解决方案
+      description: 你希望 vpnmax 怎么做？
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 你考虑过的替代方案
+      description: 有没有其他方式也能解决这个问题？
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 额外信息
+      description: 任何你觉得有用的信息（参考链接、截图、类似项目的做法等）。

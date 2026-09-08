@@ -1,0 +1,8 @@
+# ShellCheck 全局配置
+# https://www.shellcheck.net/wiki/
+
+# 默认 shell（项目脚本全部 #!/bin/bash）
+shell=bash
+
+# 已知不影响正确性的警告，全局关闭
+disable=SC1091  # Not following: 外部 source 文件（动态路径，shellcheck 无法追踪）
