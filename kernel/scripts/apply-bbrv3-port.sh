@@ -17,10 +17,30 @@ kernel_version=$(awk '
 
 patch_file="${BBRV3_PATCH:-$repo_root/patches/bbrv3-linux-$kernel_version.patch}"
 
+# 精确匹配失败时，自动找最近版本的 patch 兜底（BBRv3 是独立 TCP 模块，跨版本兼容性好）
 if [[ ! -f "$patch_file" ]]; then
-  echo "BBRv3 patch not found for linux-$kernel_version.y: $patch_file" >&2
-  echo "Add a matching patches/bbrv3-linux-$kernel_version.patch before building this kernel series." >&2
-  exit 1
+  echo "Exact patch not found for linux-$kernel_version.y; searching nearest version..." >&2
+  _major=$(echo "$kernel_version" | cut -d. -f1)
+  _found=""
+  for _minor in $(seq $(echo "$kernel_version" | cut -d. -f2) -1 0); do
+    _candidate="$repo_root/patches/bbrv3-linux-${_major}.${_minor}.patch"
+    if [[ -f "$_candidate" ]]; then
+      _found="$_candidate"
+      break
+    fi
+  done
+  # 还没找到就搜全目录，取版本号最大的
+  if [[ -z "$_found" ]]; then
+    _found=$(ls "$repo_root/patches/bbrv3-linux-"*.patch 2>/dev/null | sort -V | tail -1 || true)
+  fi
+  if [[ -n "$_found" ]]; then
+    echo "Falling back to nearest patch: $(basename "$_found")" >&2
+    patch_file="$_found"
+  else
+    echo "BBRv3 patch not found for linux-$kernel_version.y: $patch_file" >&2
+    echo "Add a matching patches/bbrv3-linux-$kernel_version.patch before building this kernel series." >&2
+    exit 1
+  fi
 fi
 
 # 先试精确应用；失败再退到带模糊匹配的 patch(1)。
