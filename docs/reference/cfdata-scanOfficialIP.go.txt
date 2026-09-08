@@ -1,0 +1,99 @@
+# CFData-WEB 测量逻辑参照（PoemMisty/CFData-WEB，MIT）
+# 融合点：scanOfficialIP（直连候选 IP 取 trace 读 colo + 计 TCP 延迟）已移植为 lib/edgeprefer.sh
+# 全文存档以下，供日后对逻辑：
+
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+func scanOfficialIP(ctx context.Context, ip string, port int, delay int) (*ScanResult, string, string) {
+	dialer := &net.Dialer{Timeout: timeout}
+	start := time.Now()
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
+	if err != nil {
+		return nil, "tcp_connect_failed", err.Error()
+	}
+
+	if delay > 0 && time.Since(start).Milliseconds() > int64(delay) {
+		conn.Close()
+		return nil, "delay_exceeded", fmt.Sprintf("connect=%dms, delay=%dms", time.Since(start).Milliseconds(), delay)
+	}
+
+	connClosed := false
+	closeConn := func() {
+		if !connClosed {
+			connClosed = true
+			conn.Close()
+		}
+	}
+	defer closeConn()
+
+	tcpDuration := time.Since(start)
+	scheme := "http://"
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return conn, nil
+		},
+	}
+	if isTLSPort(port) {
+		scheme = "https://"
+		transport.TLSClientConfig = tlsConfigWithRootCAs("speed.cloudflare.com")
+	}
+
+	client := http.Client{
+		Transport: wrapDebugTransport("official-trace", transport),
+		Timeout:   3 * time.Second,
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", scheme+requestURL, nil)
+	if err != nil {
+		return nil, "request_create_failed", err.Error()
+	}
+	req.Host = "speed.cloudflare.com"
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Close = true
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "trace_request_failed", err.Error()
+	}
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	resp.Body.Close()
+	if err != nil {
+		return nil, "trace_read_failed", err.Error()
+	}
+	bodyStr := string(bodyBytes)
+	trace := parseTraceResponse(bodyStr)
+	dataCenter := strings.TrimSpace(trace["colo"])
+	if dataCenter == "" {
+		if debugMode {
+			sendLog(fmt.Sprintf("[official-scan-debug] trace missing colo: ip=%s port=%d body=%q", ip, port, strings.TrimSpace(bodyStr)))
+		}
+		return nil, "trace_missing_colo", strings.TrimSpace(bodyStr)
+	}
+
+	loc := locationMap[dataCenter]
+	res := &ScanResult{
+		IP:          ip,
+		Port:        port,
+		DataCenter:  dataCenter,
+		DCCountry:   loc.Cca2,
+		Region:      loc.Region,
+		City:        loc.City,
+		LatencyStr:  fmt.Sprintf("%dms", tcpDuration.Milliseconds()),
+		TCPDuration: tcpDuration,
+	}
+	return res, "", ""
+}
+
