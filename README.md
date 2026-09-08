@@ -350,6 +350,12 @@ curl -v http://127.0.0.1:订阅端口/token/clmi.yaml
 - **出口 prefer_ipv4 常态化**：不再仅 `--force` 才修，幂等对齐。
 - **verify 1c 回归**：SSH/旧残留/内核/cloudflared pin 版/订阅-隧道一致性。
 
+## 架构原则：鱼缸论（ frozen vs 活水）
+
+- **冻结层（鱼缸造景， ours，可回滚）**：`vendor/sb.sh`（pin 死）、BBRv3 补丁（pin 在 `kernel/patches/`）、本仓全部脚本逻辑。只在我们主动决定时才 re-pin，任何时候能回滚。
+- **活水层（大厂维护，拿现成的）**：sing-box / cloudflared / WARP 客户端——官方有专业团队编译维护，比我们自己编更稳；部署时从官方取（版本 pin + 校验），绝不自建编译。
+- **内核是例外中的例外**：BBRv3 补丁不在主线内核里，官方不出货——`kernel/` 流水线每天拉 kernel.org 最新版 + 打我们冻结的补丁，正好是“活水底料 + 冻结配方”。哪天主线自带 BBRv3，流水线即可退役。
+
 ## 感谢
 
 vpnmax 在以下项目和服务的基础上进行集成、改造和安全加固：
