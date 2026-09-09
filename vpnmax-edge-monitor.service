@@ -1,0 +1,20 @@
+[Unit]
+Description=VPNMax Edge Monitor - Argo隧道质量监控
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/vpnmax-edge-monitor.sh
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# 安全加固
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/etc/s-box /var/lock /tmp
+
+[Install]
+WantedBy=multi-user.target
