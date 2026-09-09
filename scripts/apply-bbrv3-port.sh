@@ -21,8 +21,8 @@ if [[ ! -f "$patch_file" ]]; then
   # 上游开新系列(如 7.1 -> 7.2)时补丁文件必然缺席。BBRv3 的移植内容跨小版本
   # 基本不变，冲突通常只是行号偏移，直接硬退出会让整条流水线停摆到有人手工补文件。
   # 这里回退到版本号最大的那份旧补丁，配合下面的模糊应用去试；真冲突仍会失败。
-  fallback_patch=$(ls "$repo_root"/patches/bbrv3-linux-*.patch 2>/dev/null \
-    | sort -t- -k3 -V | tail -n 1)
+  fallback_patch=$(ls "$repo_root"/patches/bbrv3-linux-*.patch 2>/dev/null |
+    sort -t- -k3 -V | tail -n 1)
   if [[ -z "$fallback_patch" ]]; then
     echo "BBRv3 patch not found for linux-$kernel_version.y: $patch_file" >&2
     echo "Add a matching patches/bbrv3-linux-$kernel_version.patch before building this kernel series." >&2
@@ -41,12 +41,12 @@ if git apply --check "$patch_file" 2>/dev/null; then
   git apply "$patch_file"
 else
   echo "Exact patch application failed; retrying with fuzzy matching." >&2
-  if ! patch -p1 --forward --fuzz=3 --dry-run < "$patch_file"; then
+  if ! patch -p1 --forward --fuzz=3 --dry-run <"$patch_file"; then
     echo "BBRv3 patch does not apply to this tree even with fuzz." >&2
     echo "Refresh patches/bbrv3-linux-$kernel_version.patch against the current linux-$kernel_version.y tree." >&2
     exit 1
   fi
-  patch -p1 --forward --fuzz=3 < "$patch_file"
+  patch -p1 --forward --fuzz=3 <"$patch_file"
   echo "WARNING: patch applied with fuzz; refresh the patch file when convenient." >&2
 fi
 
