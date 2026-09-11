@@ -7,7 +7,8 @@
 }
 
 @test "lib/time.sh ensure_time_sync dry-run" {
-  run bash -c 'DRY_RUN=true source lib/time.sh; DRY_RUN=true ensure_time_sync'
+  # lib/time.sh 依赖 lib/common.sh 的 info()/run()，必须先 source 前者
+  run bash -c 'source lib/common.sh; source lib/time.sh; DRY_RUN=true ensure_time_sync'
   [[ "$output" == *"dry-run"* ]]
 }
 

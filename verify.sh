@@ -436,16 +436,20 @@ else
 fi
 
 # 6. 域名分流
+# 旧实现检查 /etc/s-box/sbwpph.json，但该文件在所有 sb.sh 版本里都不存在（属永久误报，一直 warn）。
+# 改为检真实的部署配置 /etc/s-box/sb.json 里含 domain 的 route 规则数。
 echo "--- 域名分流 ---"
-if [ -f /etc/s-box/sbwpph.json ]; then
-    DOMAIN_COUNT="?"
-    if command -v python3 >/dev/null 2>&1; then
-        DOMAIN_COUNT=$(python3 -c "import json; print(len(json.load(open('/etc/s-box/sbwpph.json'))['route']['rules'][0].get('domain',[])))" 2>/dev/null || echo "?")
+_DY_CONF="/etc/s-box/sb.json"
+if [ -f "$_DY_CONF" ] && command -v jq >/dev/null 2>&1; then
+    DOMAIN_COUNT=$(jq '[.route.rules[]? | select(.domain != null)] | length' "$_DY_CONF" 2>/dev/null || echo "?")
+    if [ "$DOMAIN_COUNT" != "0" ] && [ "$DOMAIN_COUNT" != "?" ]; then
+        ok "域名分流已配置（sb.json 中含 domain 的 route 规则：${DOMAIN_COUNT} 条）"
+        PASS=$((PASS + 1))
+    else
+        warn "未检测到域名分流规则（sb.json 中 domain 规则数=${DOMAIN_COUNT}）"
     fi
-    ok "域名分流文件存在 (${DOMAIN_COUNT} 个域名)"
-    PASS=$((PASS + 1))
 else
-    warn "sbwpph.json 不存在（可能未配置域名分流）"
+    warn "无法检测域名分流（/etc/s-box/sb.json 缺失或缺少 jq）"
 fi
 
 echo ""

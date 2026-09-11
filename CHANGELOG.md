@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-09-12 — 全面审计修复（供应链 / 权限 / 死副本 / 文档一致性）
+
+对公开仓库做一次只读全面审计（CI 权限、路径映射、脱敏、文档一致性、脚本语法与 lint），本轮修掉以下项：
+
+* **P0 供应链**：`build-bbrv3.yml` 的第三方 action `Mattraks/delete-workflow-runs` 由浮动分支 `@main` 改为固定 commit（`0cf693b`）；其余 4 个 action（checkout / upload-artifact / download-artifact / action-gh-release）同样钉到 commit SHA。
+* **P0 权限最小化**：工作流原为全局 `contents: write + actions: write`，第三方 action 因此能拿到仓库写权限。改为顶层 `contents: read`，各 job 按需覆盖：`cleanup` 只需 `actions: write`，`build` / `update-config-baseline` 才给 `contents: write`。
+* **P0 运行历史可追溯**：`cleanup` 原为 `retain_days: 0` + `keep_minimum_runs: 0`，会把失败历史全部删掉（实测 API 只剩 1 条记录，失败后无法回溯）。改为保留 14 天 / 至少 5 条。
+* **P1 删死副本（同一类路径坑的根因）**：删除 `kernel/patches/`、`kernel/scripts/`、`kernel/x86-64.config`、`kernel/arm64.config` —— 它们是“工作流曾在 kernel/ 下”时期的副本，而脚本 `repo_root` 与工作流实际读的都是仓库根那份，两份 config 已经漂移（`CONFIG_RUSTC_VERSION` 109800 vs 109801）。`kernel/README.md` 改写为“权威路径在仓库根”的说明。
+* **P1 删上游死代码**：删除 `kernel/install.sh`（上游 byJoey 原版安装器，全仓零引用，且下载的是上游 release 而非本仓）与 `kernel/cve_2026_31431_detector.py`。
+* **P1 文档指错源**：README “鱼缸论”段落原写“BBRv3 补丁 pin 在 `kernel/patches/`”，按此修改不会生效；改为仓库根 `patches/`，并补上内核配置基线的真实位置。
+* **P1 Edge Monitor 安装入口不完备**：README 推荐的 `install-edge-monitor.sh` 原先不装 `cloudflared-argo.service` / `cloudflared-argo-start.sh`（service 的 ExecStart 指向后者，缺它服务起不来），也不移除旧的 `vpnmax-argo-keepalive` cron → 新旧保活并存会让 G4 双进程问题复活。现补齐：安装 cloudflared-argo 一套、安装前先移除旧保活、卸载时一并清理。
+* **P1 测试从未被执行且本身是坏的**：新增独立 `test` job（bats，不参与构建链路故不阻塞 release）；修复 `tests/test_lib.bats` 中 `time.sh` 用例（没 source `lib/common.sh`，`info: command not found`，该用例实际一直失败）。
+* **P2 清理清单漏项**：`cleanup.sh` 旧 sysctl 清理清单补上小写 `99-acvpn.conf` / `99-ACVPN.conf`（Linux 文件名区分大小写，实测存在过小写版本）。
+* **P2 vendor 现状诚实化**：`vendor/README.md` 原称“零上游调用 / 已 patch 禁上游污染”，但 `acme.sh` / `CFwarp.sh` / `bbr.sh` / `sbwpph_*` 均未入仓，对应“优先用 vendor”分支恒不生效 → 文档改写为“未入仓清单 + 当前恒走上游”，并指出单文件部署下 vendor 相对路径本身也解析不到。
+* **P2 去掉 `--insecure`**：`vendor/sb.sh` 的 `inssbwpph()` 回退下载原带 `--insecure`（关闭 TLS 校验后把二进制 `chmod +x` 以 root 执行），改为强制 https + TLS1.2、失败即中止该组件；同步更新 `SB_SHA256`（`46faf59b…` → `9b5f4b91…`）。
+* **P2 `.gitattributes` 规则失效**：`*.example text eol=lf` 与 `.gitignore text eol=lf` 因缺换行粘成一行，导致 `.gitignore` 规则从未生效；重写并补 `.shellcheckrc` / `.yamllint` / `.editorconfig`（这三个文件此前无规则，在 Windows 检出下变 CRLF，使本地 shellcheck 报大量 SC1017 噪声）。
+* **P2 SKILL.md 陈旧**：文档里承诺的 Telegram 推送订阅与 `sbwpph.json` 在代码中均不存在，改为与实现一致的描述。
+* **P2 日志一致性**：`vendor/README.md` 标题由“零上游调用”改为现状描述，避免把目标当成事实。
+
+**验证**：32 个 shell 文件 `bash -n` 全通过；自有代码 shellcheck 仅剩 SC1090（动态 source，已知良性）；工作流 YAML 解析通过；`git ls-files --eol` 确认索引行尾全 LF（53/53）。
+
 ## 2026-09-08 — vpnmax 二次优化（7 台调优缺口 + 融合怪第一步）
 
 * **G2 出口目标 prefer_ipv4**：与 7 台调优最佳状态对齐（ipv4_only 在有 v6 机器上掐回退）；force_ipv4_lock 改常态幂等，不再仅 --force。

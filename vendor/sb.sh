@@ -4190,7 +4190,9 @@ case $(uname -m) in
 aarch64) cpu=arm64;;
 x86_64) cpu=amd64;;
 esac
-# vpnmax: 优先使用 vendor 本地 sbwpph，SHA256 校验
+# vpnmax: 优先使用 vendor 本地 sbwpph_${cpu}。
+# ⚠️ 现状说明（勿当已修）：vendor/sbwpph_* 并未入仓，所以本 if 恒为假，实际总是走下面的上游回退分支。
+# 本分支也没有任何 SHA256 校验代码（原注释声称有，属误描述，已改正）。
 _vendor_sbwpph="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" 2>/dev/null || echo ".")/vendor/sbwpph_${cpu}"
 if [ -s "$_vendor_sbwpph" ]; then
 cp -f "$_vendor_sbwpph" /etc/s-box/sbwpph
@@ -4198,7 +4200,13 @@ chmod +x /etc/s-box/sbwpph
 green "使用 vendor 本地 sbwpph_${cpu}"
 else
 yellow "vendor 缺失 sbwpph_${cpu}，回退上游下载（非 vpnmax 推荐模式）"
-curl -L -o /etc/s-box/sbwpph -# --retry 2 --insecure https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/sbwpph_$cpu
+# 安全：去掉原先的 --insecure（它等于关闭 TLS 证书校验，字节可被中间人篡改后再 root 执行）
+# 仅允许 https + TLS1.2+，下载失败则中止本组件，不留下半成品二进制。
+if ! curl -fL --proto '=https' --tlsv1.2 -o /etc/s-box/sbwpph -# --retry 2 https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/sbwpph_$cpu; then
+red "sbwpph 下载失败（TLS 校验不通过或网络不可达），已中止，未安装该组件"
+rm -f /etc/s-box/sbwpph
+return 1
+fi
 chmod +x /etc/s-box/sbwpph
 fi
 fi

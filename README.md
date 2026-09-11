@@ -365,7 +365,8 @@ curl -v http://127.0.0.1:订阅端口/token/clmi.yaml
 ## vpnmax 融合说明（相对 vpnmax 的增量）
 
 - **sb 零上游**：`vendor/sb.sh` 入仓，部署优先本地拷贝，缺失才回退自家 raw，全程 SHA256 校验；`SB_URL` 已指向自家仓库。
-- **BBR 内核自供**：`kernel/` 移植自家构建流水线（每日定时构建发 release），部署默认从本仓 release 拉 deb，首个构建落地前桥接回退老仓（warn 标明）。
+  - 注意：`vendor/` 目前只有 `sb.sh`。`acme.sh` / `CFwarp.sh` / `bbr.sh` / `sbwpph` **尚未入仓**，用到这些功能时仍会实时拉取上游，详见 `vendor/README.md` 的“未入仓清单”。
+- **BBR 内核自供**：流水线在 `.github/workflows/build-bbrv3.yml`（每日定时构建发 release）；`kernel/` 只是构建工作目录（clone 的内核源码与 deb 不入仓）。部署默认从本仓 release 拉 deb，首个构建落地前桥接回退老仓（warn 标明）。
 - **智能带宽调优**：移植自 byJoey，自动测速 + 按区域（亚太/美欧）+ 内存上限动态算 TCP buffer，`VPNMAX_BUFFER_MODE` 可控。
 - **边缘优选**：`lib/edgeprefer.sh` 在 Argo 启动前采样官方段，选最优 colo 与 v4/v6 家族，经 `argo-extra.conf` 注入隧道；`EDGE_PREFER=off` 可跳过，`ARGO_REGION=xx` 可手动 pin region。
 - **出口 prefer_ipv4 常态化**：不再仅 `--force` 才修，幂等对齐。
@@ -373,9 +374,9 @@ curl -v http://127.0.0.1:订阅端口/token/clmi.yaml
 
 ## 架构原则：鱼缸论（ frozen vs 活水）
 
-- **冻结层（鱼缸造景， ours，可回滚）**：`vendor/sb.sh`（pin 死）、BBRv3 补丁（pin 在 `kernel/patches/`）、本仓全部脚本逻辑。只在我们主动决定时才 re-pin，任何时候能回滚。
+- **冻结层（鱼缸造景， ours，可回滚）**：`vendor/sb.sh`（pin 死）、BBRv3 补丁（pin 在**仓库根** `patches/`）、内核配置基线（**仓库根** `x86-64.config` / `arm64.config`）、本仓全部脚本逻辑。只在我们主动决定时才 re-pin，任何时候能回滚。
 - **活水层（大厂维护，拿现成的）**：sing-box / cloudflared / WARP 客户端——官方有专业团队编译维护，比我们自己编更稳；部署时从官方取（版本 pin + 校验），绝不自建编译。
-- **内核是例外中的例外**：BBRv3 补丁不在主线内核里，官方不出货——`kernel/` 流水线每天拉 kernel.org 最新版 + 打我们冻结的补丁，正好是“活水底料 + 冻结配方”。哪天主线自带 BBRv3，流水线即可退役。
+- **内核是例外中的例外**：BBRv3 补丁不在主线内核里，官方不出货——流水线每天拉 kernel.org 最新版 + 打我们冻结在根目录 `patches/` 的补丁，正好是“活水底料 + 冻结配方”。哪天主线自带 BBRv3，流水线即可退役。
 
 ## 感谢
 

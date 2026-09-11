@@ -1,8 +1,8 @@
 ---
 name: vpnmax
 description: >
-  基于 ccAzy/ACVPN 二次加固的 sing-box 一键部署指南。安全收敛：独立防火墙链/外部脚本锁定+SHA256校验/核心可选失败语义/精确进程清理/网络感知加固。
-  Use when the user asks to deploy sing-box, set up a VPN/VPS proxy node, configure Vless/Hysteria2/Tuic5/Vmess protocols, set up local IP subscriptions, Argo tunnels, domain split routing, or push node subscriptions to Telegram.
+  基于 yonggekkk/sing-box-yg 与 byJoey/Actions-bbr-v3 集成改造、并经 ccAzy/ACVPN 安全收敛的 sing-box 一键部署指南。安全收敛：独立防火墙链/外部脚本锁定+SHA256校验/核心可选失败语义/精确进程清理/网络感知加固。
+  Use when the user asks to deploy sing-box, set up a VPN/VPS proxy node, configure Vless/Hysteria2/Tuic5/Vmess protocols, set up local IP subscriptions, Cloudflare Argo tunnels, or domain split routing.
 ---
 
 # vpnmax — Sing-box VPN 部署流程（加固版）
@@ -135,7 +135,7 @@ bash verify.sh
 | 订阅 | `printf "3\n8\n1\n\n\n0\n0\n" \| sb` | `[ -f /etc/s-box/subport.log ]` |
 | Hysteria2 | `printf "4\n3\n2\n40000:42000\n0\n" \| sb` | `ss -ulnp \| grep sing-box` |
 | Argo | `printf "3\n3\n1\n1\n0\n" \| sb` | `grep trycloudflare /etc/s-box/argo.log` |
-| 域名分流 | `printf "5\n3\n1\n域名列表\n0\n0\n" \| sb` | `[ -f /etc/s-box/sbwpph.json ]` |
+| 域名分流 | `printf "5\n3\n1\n域名列表\n0\n0\n" \| sb` | `[ -f /etc/s-box/jhdy.txt ]`（聚合域名分流订阅产物；原文档写的 `sbwpph.json` 不存在） |
 | 验证 | `SERVER_IP=<IP> bash verify.sh` | 全部通过 |
 
 ## 备注

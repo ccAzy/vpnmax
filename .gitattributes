@@ -5,5 +5,10 @@
 *.yml text eol=lf
 *.json text eol=lf
 *.conf text eol=lf
-*.example text eol=lf.gitignore text eol=lf
+*.bats text eol=lf
+*.example text eol=lf
+.gitignore text eol=lf
 .gitattributes text eol=lf
+.shellcheckrc text eol=lf
+.yamllint text eol=lf
+.editorconfig text eol=lf

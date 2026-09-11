@@ -95,7 +95,10 @@ MANIFEST="/var/log/vpnmax-singbox-manifest.log"
 # 锁定的 sb.sh（vpnmax 融合：仓库自带 vendor/sb.sh，与 ccAzy/sing-box-yg acvpn 分支
 # 2026-08-05 提交字节一致；SB_URL 仅为 vendor 缺失时的自家回退，绝不指向上游）
 SB_COMMIT="5001e76efc9e15eac1f8ff33a0b389172e331e1d"
-SB_SHA256="46faf59b755350438a362b349c1b01af9edcdbcc69e4424f2af2188413803c77"
+# SB_SHA256 对应的是“上游 commit + vpnmax 本地 patch”之后的文件。
+# 每次改 vendor/sb.sh 都必须同步重算本常量，否则安装时校验失败拒绝安装。
+# 2026-09-12 本地 patch：inssbwpph() 的回退下载去掉 --insecure（强制 https + TLS1.2，失败即中止）。
+SB_SHA256="9b5f4b91ce892dc9db89c8dfaf2460ee5136a63e38a3abcd04a19e2f8d0a50c3"
 SB_URL="https://raw.githubusercontent.com/ccAzy/vpnmax/main/vendor/sb.sh"
 
 RED='\033[0;31m'

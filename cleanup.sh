@@ -286,6 +286,7 @@ clean_sysctl() {
     echo "--- 清理系统已应用参数（不改动第三方配置） ---"
     # 我们只移除脚本文档明确自己写入的 sysctl.d 文件（若仍存在）
     for f in /etc/sysctl.d/99-ACVPN-security.conf /etc/sysctl.d/99-ACVPN-brutal.conf \
+        /etc/sysctl.d/99-acvpn.conf /etc/sysctl.d/99-ACVPN.conf \
         /etc/sysctl.d/99-vpnmax-security.conf /etc/sysctl.d/99-vpnmax-brutal.conf; do
         # 同上：if 形式防 set -e 在文件不存在时杀脚本
         if [ -f "$f" ]; then

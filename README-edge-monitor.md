@@ -58,16 +58,32 @@ Argo 隧道质量监控 + 自动重选系统
 
 ## 安装
 
+> 两个入口分工不同，别混用：
+>
+> | 场景 | 用哪个 | 为什么 |
+> | --- | --- | --- |
+> | 全新安装 | `install-edge-monitor.sh install` | 会自动先移除旧 cron 保活，再装 monitor |
+> | 从旧保活升级 | `migrate-to-edge-monitor.sh` | 带交互确认与迁移前后状态对比，适合线上切换 |
+
 ```bash
-# 一键安装
+# 全新安装（或重装）：装 cloudflared-argo 一套 + edge-monitor，并移除旧 cron 保活
 bash install-edge-monitor.sh install
 
 # 查看状态
 bash install-edge-monitor.sh status
 
-# 卸载
+# 卸载（含 cloudflared-argo.service，不留孤儿 unit）
 bash install-edge-monitor.sh uninstall
 ```
+
+`install` 会做这几件事（顺序固定）：
+
+1. 移除旧的 `vpnmax-argo-keepalive` cron / 脚本 / 锁文件（旧保活与新 Monitor 职责重叠，
+   两者并存会出现两个实例抢着重启 cloudflared，即历史上的双进程问题）。
+2. 安装 `/usr/local/sbin/vpnmax-edge-monitor.sh`、`vpnmax-speed-test.sh`、
+   `cloudflared-argo-start.sh`。
+3. 安装并 enable `vpnmax-edge-monitor.service` 与 `cloudflared-argo.service`。
+4. 创建 `/etc/s-box/edge-monitor.*` 状态文件并启动服务。
 
 ## 使用
 

@@ -1,3 +1,7 @@
+# yamllint disable rule:line-length
+# 本文件由上游 byJoey/Actions-bbr-v3 的构建流程移植而来，内含很长的 shell 行，80 列不适用。
+# 仓库 .yamllint 已设 max:150；这里再显式声明一次，让不读取仓库配置的检查器
+# （例如从工作区根目录运行 yamllint 的工具）也能得到一致判定。
 name: 构建带有BBRv3的内核
 
 on:
@@ -6,14 +10,11 @@ on:
     # Daily automatic kernel refresh. BBRv3 itself stays pinned to the repo patch.
     - cron: "0 16 * * *"
 
-env:
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  GH_REPO: ${{ github.repository }}
-
+# 权限与凭据都按最小范围给：
+# - 顶层只给读，各 job 需要什么自己声明（避免第三方 action 拿到全仓写权限）
+# - GH_TOKEN/GH_REPO 不放工作流级 env（那样每个 step 都能拿到），只在用 gh CLI 的 job 注入
 permissions:
-  contents: write
-  actions: write
+  contents: read
 
 concurrency:
   group: bbrv3-kernel-build
@@ -22,6 +23,10 @@ concurrency:
 jobs:
   preflight:
     runs-on: ubuntu-latest
+    # 本 job 用 gh CLI 查 release，需要 token 与仓库坐标
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
     outputs:
       kernel_version: ${{ steps.plan.outputs.kernel_version }}
       raw_kernel_version: ${{ steps.plan.outputs.raw_kernel_version }}
@@ -76,12 +81,18 @@ jobs:
     needs: preflight
     if: needs.preflight.outputs.build_needed == 'true'
     runs-on: ubuntu-latest
+    # 本 job 只需要删运行记录，历史上被默认继承了 contents: write，属过度授权
+    permissions:
+      actions: write
+      contents: read
     steps:
       - name: 删除旧的工作流运行记录
-        uses: Mattraks/delete-workflow-runs@main
+        # 固定在 commit 上，不用浮动分支（@main 一旦被上游改写即等于远程代码执行）
+        uses: Mattraks/delete-workflow-runs@0cf693bc9909e5e867ee8f27b813224ba862939c  # main @ 2026-09-12
         with:
-          retain_days: 0
-          keep_minimum_runs: 0
+          # 保留 14 天且至少 5 条：原来 retain_days: 0 / keep_minimum_runs: 0 会把失败历史全删光，事后无法追溯
+          retain_days: 14
+          keep_minimum_runs: 5
 
   build:
     needs: [preflight, cleanup]
@@ -115,9 +126,15 @@ jobs:
             release_suffix: -max
             localversion: -joeyblog-bbrv3-max
     runs-on: ${{ matrix.runs_on }}
+    # 需要创建 / 更新 GitHub Release
+    permissions:
+      contents: write
     env:
       ARCH: ${{ matrix.arch }}
       KERNEL_VERSION: ${{ needs.preflight.outputs.kernel_version }}
+      # 本 job 用 gh CLI 查/建 release
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: 检查是否已发布
         id: check_release
@@ -133,7 +150,7 @@ jobs:
 
       - name: 检出代码
         if: env.BUILD_NEEDED == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
       - name: 安装依赖项
         if: env.BUILD_NEEDED == 'true'
@@ -155,7 +172,7 @@ jobs:
         working-directory: ./kernel
         run: |
           branch=$(echo "${{ env.KERNEL_VERSION }}" | grep -oP '^\d+\.\d+')
-          git clone --depth=1 --branch linux-$branch.y \
+          git clone --depth=1 --branch "linux-$branch.y" \
             https://github.com/gregkh/linux.git linux
 
       - name: 应用 BBRv3 补丁
@@ -204,7 +221,7 @@ jobs:
 
       - name: 上传最终配置文件
         if: env.BUILD_NEEDED == 'true' && matrix.profile == 'standard'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: config-${{ matrix.arch }}-${{ matrix.profile }}-${{ env.KERNEL_VERSION }}
           path: ./build-configs/${{ matrix.arch }}*.config
@@ -214,9 +231,9 @@ jobs:
         working-directory: ./kernel/linux
         run: |
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            make ARCH=arm64 bindeb-pkg -j$(nproc) LOCALVERSION=${{ matrix.localversion }} KDEB_COMPRESS=gzip skipdbg=true
+            make ARCH=arm64 bindeb-pkg -j"$(nproc)" LOCALVERSION=${{ matrix.localversion }} KDEB_COMPRESS=gzip skipdbg=true
           else
-            make bindeb-pkg -j$(nproc) LOCALVERSION=${{ matrix.localversion }} KDEB_COMPRESS=gzip skipdbg=true
+            make bindeb-pkg -j"$(nproc)" LOCALVERSION=${{ matrix.localversion }} KDEB_COMPRESS=gzip skipdbg=true
           fi
 
       - name: 检查 deb 包
@@ -245,21 +262,21 @@ jobs:
 
       - name: 上传发布标记
         if: env.BUILD_NEEDED == 'true' && env.PUBLISH_NEEDED == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: publish-${{ matrix.arch }}-${{ matrix.profile }}-${{ env.KERNEL_VERSION }}
           path: ./publish-markers/${{ matrix.arch }}-${{ matrix.profile }}
 
       - name: 上传 deb 包
         if: env.BUILD_NEEDED == 'true' && env.PUBLISH_NEEDED == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: deb-${{ matrix.arch }}-${{ matrix.profile }}
           path: ./kernel/linux-*.deb
 
       - name: 发布到 GitHub Release
         if: env.BUILD_NEEDED == 'true' && env.PUBLISH_NEEDED == 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:
           tag_name: ${{ matrix.arch }}-${{ env.KERNEL_VERSION }}${{ matrix.release_suffix }}
           files: |
@@ -271,12 +288,15 @@ jobs:
     needs: [preflight, build]
     if: ${{ always() && needs.preflight.outputs.build_needed == 'true' && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
+    # 需要把刷新后的 config 基线提交回 main
+    permissions:
+      contents: write
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
       - name: 下载本轮最终配置
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         continue-on-error: true
         with:
           pattern: config-*-standard-*
@@ -284,7 +304,7 @@ jobs:
           merge-multiple: true
 
       - name: 下载发布标记
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         continue-on-error: true
         with:
           pattern: publish-*-standard-*
@@ -321,3 +341,18 @@ jobs:
           git add x86-64.config arm64.config
           git commit -m "Refresh generated kernel config baselines [skip ci]"
           git push
+
+  test:
+    # 独立作业：不参与内核构建链路，因此不会阻塞 release，只做单元测试
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+
+      - name: 安装 bats
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats
+
+      - name: 运行单元测试
+        run: bats tests/
