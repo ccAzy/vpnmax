@@ -114,7 +114,11 @@ ok() { echo -e "${GREEN}[✓]${N}   $*"; }
 warn() { echo -e "${YELLOW}[!]${N}   $*"; }
 fail() { echo -e "${RED}[✗]${N}   $*"; }
 
-manifest() { echo "[$(date -Is)] $*" >>"$MANIFEST" 2>/dev/null || true; }
+# 仓库模式下以 lib/common.sh 为准；单文件模式（无 lib）才用下面这个兜底。
+# 注：此前是无条件定义，会把 lib 的版本顶掉 → 改 lib/common.sh 不生效。
+if ! declare -F manifest >/dev/null 2>&1; then
+    manifest() { echo "[$(date -Is)] $*" >>"$MANIFEST" 2>/dev/null || true; }
+fi
 
 run() {
     if $DRY_RUN; then
@@ -125,9 +129,12 @@ run() {
 }
 # ── 安装 sing-box-yg（vpnmax 融合：vendor 优先零上游，自家 raw 兜底，全程 SHA） ──
 # vpnmax融合：sb.sh 零上游获取（与 lib/singbox.sh 同逻辑，单文件自包含）。
+# 仓库模式下以 lib/singbox.sh 为准；单文件模式（无 lib）才用下面这个兜底。
+# 注：此前是无条件定义，会把 lib 的版本顶掉 → 改 lib/singbox.sh 不生效。
+if ! declare -F fetch_sb_sh >/dev/null 2>&1; then
 fetch_sb_sh() { # $1=输出路径
     local out="$1" src="" d
-    for d in "${SCRIPT_DIR:-.}/vendor" "./vendor" "/usr/local/lib/vpnmax/vendor"; do
+    for d in "${SCRIPT_DIR:-.}/vendor" "./vendor" "$(dirname "${BASH_SOURCE[0]:-.}")/../vendor" "/usr/local/lib/vpnmax/vendor"; do
         if [ -s "$d/sb.sh" ]; then
             src="$d/sb.sh"
             break
@@ -142,6 +149,7 @@ fetch_sb_sh() { # $1=输出路径
     fi
     [ -s "$out" ]
 }
+fi
 if ! declare -F install_singbox_yg >/dev/null 2>&1; then
     install_singbox_yg() {
         if ! ${FORCE:-false} && command -v sb &>/dev/null && [ -f /etc/s-box/sb.json ]; then
@@ -183,7 +191,7 @@ if ! declare -F install_singbox_yg >/dev/null 2>&1; then
             elif [ -f "$SB_PATCH_MARKER" ] && [ "$cur_sha" = "$(cat "$SB_PATCH_MARKER" 2>/dev/null || true)" ]; then
                 ok "sing-box-yg 哈希命中补丁白名单（Argo http2→auto 已打）"
             else
-                warn "现有 /usr/bin/sb 哈希不在可信集合（原版/补丁版），重新下载覆盖..."
+                warn "现有 /usr/bin/sb 哈希不在可信集合（原版/补丁版），从 vendor/自家源重新获取覆盖..."
                 local tmp="/tmp/sb.sh.download"
                 if ! fetch_sb_sh "$tmp" || [ ! -s "$tmp" ]; then
                     fail "sb.sh 重新获取失败（vendor 缺失且 $SB_URL 不可达）"
@@ -211,22 +219,18 @@ if ! declare -F install_singbox_yg >/dev/null 2>&1; then
         fi
         sleep 1
 
-        if ! ${FORCE:-false} && [ -f /etc/s-box/sb.json ]; then
-            ok "sing-box 已安装，跳过（--force 覆盖）"
+        [ -f /etc/s-box/sb.json ] && {
+            ok "sing-box 已安装，跳过"
             return 0
-        fi
-        if ! ${FORCE:-false} && systemctl is-active sb >/dev/null 2>&1; then
+        }
+        systemctl is-active sb >/dev/null 2>&1 && {
             ok "sing-box 服务运行中"
             return 0
-        fi
-        if ! ${FORCE:-false} && systemctl is-active xr >/dev/null 2>&1; then
+        }
+        systemctl is-active xr >/dev/null 2>&1 && {
             ok "xray 服务运行中"
             return 0
-        fi
-        if ${FORCE:-false}; then
-            info "--force 已启用，强制重装 sing-box"
-            rm -f /etc/s-box/sb.json 2>/dev/null || true
-        fi
+        }
 
         info "自动安装 sing-box（全默认配置，全程无需操作）..."
         sleep 2
@@ -306,7 +310,7 @@ check_env() {
 if ! declare -F ensure_time_sync >/dev/null 2>&1; then
     ensure_time_sync() {
         info "校准系统时间（chrony 国内源）..."
-        if $DRY_RUN; then
+        if ${DRY_RUN:-false}; then
             info "[dry-run] 将配置 chrony 并同步时间"
             return 0
         fi
@@ -321,7 +325,18 @@ CHRONY
         systemctl enable --now chrony 2>/dev/null || systemctl restart chrony 2>/dev/null || true
         timeout 15 chronyc makestep 2>/dev/null || timeout 15 ntpdate -u ntp.aliyun.com 2>/dev/null || true
         sleep 2
-        if chronyc tracking 2>/dev/null | grep -q 'Leap status.*Normal'; then ok "时间已同步（chrony Normal）"; else warn "chrony 尚未 Normal，稍后自动追上"; fi
+        if chronyc tracking 2>/dev/null | grep -q 'Leap status.*Normal'; then
+            ok "时间已同步（chrony Normal）"
+        else
+            chronyc tracking 2>&1 | head -5 || true
+            warn "chrony 尚未 Normal，稍后将自动追上（已设 makestep 1 3）"
+        fi
+        if timedatectl 2>/dev/null | grep -q 'System clock synchronized: yes'; then
+            ok "System clock synchronized: yes"
+        else
+            info "timedatectl: $(timedatectl 2>/dev/null | grep -E 'synchronized|NTP' | tr '\n' ';')"
+        fi
+        manifest "time sync ensured via chrony"
     }
 fi
 # ── 订阅配置 ──
@@ -404,16 +419,19 @@ fi
 if ! declare -F wait_subscription >/dev/null 2>&1; then
     wait_subscription() {
         info "等待订阅服务启动..."
-        local SUB_PORT="" i
-        for i in $(seq 1 30); do
+        local SUB_PORT=""
+        for _ in $(seq 1 30); do
             sleep 2
             SUB_PORT=$(get_sub_port)
             [ -n "$SUB_PORT" ] && break
         done
         if [ -n "$SUB_PORT" ]; then
             ok "订阅端口: $SUB_PORT"
-            curl -fsL --max-time 5 -o /dev/null "http://127.0.0.1:$SUB_PORT/" 2>/dev/null &&
-                ok "订阅服务 HTTP 响应正常" || warn "端口 $SUB_PORT 暂未响应 HTTP"
+            if curl -fsL --max-time 5 -o /dev/null "http://127.0.0.1:$SUB_PORT/" 2>/dev/null; then
+                ok "订阅服务 HTTP 响应正常"
+            else
+                warn "端口 $SUB_PORT 暂未响应 HTTP"
+            fi
         else
             warn "订阅服务超时未启动（已等 60s）"
         fi

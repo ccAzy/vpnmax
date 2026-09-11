@@ -1,5 +1,41 @@
 # Changelog
 
+## 2026-09-12 — lib/ 与内联兜底的一致性修复（+ 漂移检测工具）
+
+**背景**：顶层脚本同时支持两种跑法 —— 仓库模式 `source lib/*.sh`；单文件模式（`curl ... | bash`）
+靠脚本内的 `if ! declare -F f; then f() {...}; fi` 兜底。于是同一个函数有两份实现。
+
+**本次实测出的问题**
+
+* **8 个函数的兜底块已与 lib/ 分叉**。lib 是较新的那份（含 G3 修复、`run` 包装），兜底是旧版
+  → 同一台机器换个装法行为就不同，**且完全静默**。
+* 其中最严重的是 `clean_stale_acvpn_sysctl`：旧版用裸 `mkdir`/`cp`/`rm`（绕过了 `run` 包装）
+  → **单文件模式下 `--dry-run` 会真的删文件**，dry-run 契约被破坏。
+* **3 处是“内联无条件覆盖 lib”**：`manifest`（deploy_optimize / deploy_singbox）与 `fetch_sb_sh`
+  在顶层无条件重新定义 → 内联永远胜出，lib 里那份成了死代码 → **改 lib 不生效**。
+
+**修复**
+
+* 8 处兜底块按 lib/ 实现刷新：`ensure_time_sync`×2、`install_bbrv3`、`apply_sysctl`、
+  `clean_stale_acvpn_sysctl`、`install_singbox_yg`、`wait_subscription`、`config_port_hopping`。
+* 3 处无条件定义改为 `declare -F` 守卫，让 lib 优先：`manifest`×2、`fetch_sb_sh`。
+* 新增 `tools/check-fallback-sync.py`：比对“顶层脚本中该函数的第一处定义”与 lib/，
+  不一致即退出 1。**刻意不按 guard 块解析**（按块解析会被 heredoc 带偏，实测会误报），
+  改为只比“同名函数的第一处定义”，因此对 heredoc 不敏感。
+* 该工具已自测：注入一处漂移后确实报错退出 1。
+
+**验证**：`bash -n` 27/27 通过；上述 11 处与 lib/ 归一化摘要一致；脚本行尾保持 LF（CR=0）。
+
+**尚未解决（明确记录，不假装已完成）**
+
+* 检查器另发现 **10 处同名不同实现**：`clean_chains`、`ensure_argo_extra_applied`、
+  `ensure_edge_prefer`、`ensure_singbox_legacy_env`、`ensure_sub_httpd`、`install_argo_keepalive`、
+  `migrate_legacy_chains`、`setup_logrotate`、`start_argo`、`run`×3。
+* 其中 **`run` 是语义级冲突，不是笔误**：
+  顶层版 `"$@"`（错误向上传递）；lib 版 `"$@" 2>/dev/null || true`（吞掉错误与 stderr）。
+  顶层版是无条件定义 → lib 版从不生效。保留哪一份会影响全项目的失败语义，**需决策后再对齐**。
+* 因此 `check-fallback-sync.py` **暂不接入 CI**（在上述 10 处处理完之前接入就是红的）。
+
 ## 2026-09-12 — 冻结层落地（外部依赖全部 pin + 校验）
 
 承接同日审计的结论“冻结层只冻了配方没冻原料”，本轮把外部依赖的版本决定权收回本地。

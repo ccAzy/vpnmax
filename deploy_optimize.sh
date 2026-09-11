@@ -66,7 +66,11 @@ if [ -w /var/log ] && [ -d /var/log ]; then
 fi
 
 # 写部署清单（来源/版本/校验值，供审计）
-manifest() { echo "[$(date -Is)] $*" >>"$MANIFEST" 2>/dev/null || true; }
+# 仓库模式下以 lib/common.sh 为准；单文件模式（无 lib）才用下面这个兜底。
+# 注：此前是无条件定义，会把 lib 的版本顶掉 → 改 lib/common.sh 不生效。
+if ! declare -F manifest >/dev/null 2>&1; then
+    manifest() { echo "[$(date -Is)] $*" >>"$MANIFEST" 2>/dev/null || true; }
+fi
 
 cleanup() { rm -f /tmp/bbrv3.deb /tmp/bbrv3.sha256 2>/dev/null || true; }
 trap cleanup EXIT
@@ -214,12 +218,9 @@ install_dependencies() {
 if ! declare -F ensure_time_sync >/dev/null 2>&1; then
     ensure_time_sync() {
         info "校准系统时间（chrony 国内源）..."
-        if $DRY_RUN; then
+        if ${DRY_RUN:-false}; then
             info "[dry-run] 将配置 chrony 并同步时间"
             return 0
-        fi
-        if ! dpkg-query -W -f='${Status}' chrony 2>/dev/null | grep -q 'install ok installed'; then
-            warn "chrony 未安装，已在依赖阶段补齐"
         fi
         cat >/etc/chrony/chrony.conf <<'CHRONY'
 pool ntp.aliyun.com iburst
@@ -290,9 +291,10 @@ PUBLIC_IP=$(curl -fsSL --max-time 5 https://api.ipify.org 2>/dev/null) ||
 #   2) 否则 → API 取最新 max tag，并同样强制 SHA256 校验
 if ! declare -F install_bbrv3 >/dev/null 2>&1; then
     install_bbrv3() {
-        # vpnmax融合回退副本：内核产物自供（本仓 kernel/ 定时构建），主仓缺失时桥接老仓。
+        # vpnmax融合：内核产物自供（本仓 kernel/ 定时构建发 release）。
+        # BBR_RELEASE_REPO 默认 ccAzy/vpnmax；在 vpnmax 首个构建落地前桥接回退老仓（过渡期，用 warn 标明）。
         local _repo_primary="${BBR_RELEASE_REPO:-ccAzy/vpnmax}" _repo_fallback="ccAzy/Actions-bbr-v3"
-        bbr_api_get() {
+        bbr_api_get() { # $1=API 路径；按 主仓→桥接仓 顺序取首个有效响应
             local _p="$1" _r _out
             for _r in "$_repo_primary" "$_repo_fallback"; do
                 _out=$(curl -fsL -H "$UA" --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 20 "https://api.github.com/repos/$_r/$_p" 2>/dev/null || true)
@@ -404,21 +406,25 @@ fi
 if ! declare -F clean_stale_acvpn_sysctl >/dev/null 2>&1; then
     # G3回退副本（与 lib/optimize.sh 同逻辑）：部署路径清旧 ACVPN 残留
     clean_stale_acvpn_sysctl() {
-        local _acf _bd
-        _bd="/var/backups/vpnmax/stale-acvpn-$(date +%Y%m%d)"
-        for _acf in /etc/sysctl.d/99-acvpn.conf /etc/sysctl.d/99-ACVPN-security.conf /etc/sysctl.d/99-ACVPN-brutal.conf; do
-            if [ -f "$_acf" ]; then
-                mkdir -p "$_bd" 2>/dev/null || true
-                cp -a "$_acf" "$_bd/" 2>/dev/null || true
-                rm -f "$_acf" && info "已清除旧 ACVPN 残留: $_acf"
+        local f bakdir
+        bakdir="/var/backups/vpnmax/stale-acvpn-$(date +%Y%m%d)"
+        for f in /etc/sysctl.d/99-acvpn.conf /etc/sysctl.d/99-ACVPN-security.conf /etc/sysctl.d/99-ACVPN-brutal.conf; do
+            if [ -f "$f" ]; then
+                run mkdir -p "$bakdir"
+                run cp -a "$f" "$bakdir/" || true
+                run rm -f "$f"
+                ok "已清除旧 ACVPN 残留: $f（备份于 $bakdir）"
             fi
         done
     }
 fi
 if ! declare -F apply_sysctl >/dev/null 2>&1; then
     apply_sysctl() {
+        # G3修复：部署路径顺手清除旧 ACVPN 时代残留 sysctl（线上 cc/vn/qq2 实测残留）。
+        # vpnmax 的 security 文件是其超集，删旧不丢配置；先备份到 /var/backups/vpnmax/。
+        clean_stale_acvpn_sysctl
+
         info "应用网络暴力优化..."
-        clean_stale_acvpn_sysctl || true
         local mem_kb mem_mb RMEM TCPMEM CONNTRACK_MAX CONNTRACK_HASH
         mem_kb=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0)
         mem_mb=$((mem_kb / 1024))
@@ -493,12 +499,12 @@ net.ipv4.udp_wmem_min = 8192
 net.core.busy_read = 50
 net.core.busy_poll = 50
 SYS"
-        if ! run sysctl --system; then
-            warn "sysctl --system 执行失败，部分网络参数可能未生效"
-        fi
-        manifest "conntrack max=$CONNTRACK_MAX hash=$CONNTRACK_HASH"
-        ok "网络参数已写入 $conf 并应用（conntrack=$CONNTRACK_MAX，按内存分级防 OOM）"
-    }
+    if ! run sysctl --system; then
+        warn "sysctl --system 执行失败，部分网络参数可能未生效"
+    fi
+    manifest "conntrack max=$CONNTRACK_MAX hash=$CONNTRACK_HASH"
+    ok "网络参数已写入 $conf 并应用（conntrack=$CONNTRACK_MAX，按内存分级防 OOM）"
+}
 fi
 if ! declare -F apply_ethtool >/dev/null 2>&1; then
     apply_ethtool() {
