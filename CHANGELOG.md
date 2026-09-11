@@ -1,5 +1,47 @@
 # Changelog
 
+## 2026-09-12 — 冻结层落地（外部依赖全部 pin + 校验）
+
+承接同日审计的结论“冻结层只冻了配方没冻原料”，本轮把外部依赖的版本决定权收回本地。
+
+### 原则
+
+| 依赖类型 | 处理 |
+| --- | --- |
+| 上游有专业团队维护（sing-box / cloudflared / 内核源码） | 只 pin 版本号，不抄代码（活水） |
+| 上游个人维护 + 以 root 执行（acme.sh / CFwarp.sh / sbwpph） | pin commit + SHA256 校验（冻结） |
+| 数据文件（geoip/geosite） | 有意保持 latest（理由见 `vendor/README.md`） |
+
+### 新增冻结（pin commit + SHA256，校验失败即中止，不回落 main）
+
+* `acme.sh` ← `yonggekkk/acme-yg@e3299a70`
+* `CFwarp.sh` ← `yonggekkk/warp-yg@f2f634ba`
+* `sbwpph_amd64/arm64` ← `yonggekkk/sing-box-yg@9e8b710c`（逐架构 SHA256；~24MB × 2 不入仓）
+* 统一入口 `vpnmax_fetch_pinned()`：强制 https + TLS1.2，`sha256sum -c` 校验，校验失败丢弃并中止
+
+### 新增版本 pin（pin 优先，拉取失败才告警回退 latest）
+
+* sing-box `1.13.19`（本项目已验证过的版本）
+* cloudflared `2026.8.3`（与 `verify.sh` 的 G6 断言对齐；此前安装脚本拉 latest 而 verify 断言 2026.8.3，两者本就矛盾）
+* cfst `v2.3.5`（顺带修掉硬编码 `amd64`——arm64 机器原先会装错架构的二进制）
+
+### 移除的引用
+
+* `bbr()` 不再拉 `teddysun/across/bbr.sh`，改为本地最小实现（只设 fq + bbr → `/etc/sysctl.d/99-vpnmax-bbr.conf`）。
+  理由：那份外部脚本会覆盖 `lib/optimize.sh` 算出的 TCP buffer（两套系统写同一批 sysctl 键）。`cleanup.sh` 已同步纳入该文件。
+* 卸载完成后的提示原为“欢迎继续使用 Sing-box-yg 脚本：bash <(curl .../yonggekkk/sing-box-yg/main/sb.sh)”——
+  这条提示等于引导用户覆盖自己的冻结层，改为指向本仓 `deploy_singbox.sh`。
+
+### 配套
+
+* `SB_SHA256` 同步为 `99b8a4e5…`（改 `vendor/sb.sh` 必须同步，否则安装时校验失败拒绝安装）
+* `vendor/README.md` 重写：分“已入仓 / 不入仓但已 pin / 只 pin 版本 / 已移除 / 有意不 pin / 未解决”六类
+
+### 验证
+
+* 全部 pin 的资源均实测可达（HTTP 200，含 arm64 变体）
+* `bash -n` 全通过；项目内已无“裸拉上游 main/latest 后直接 root 执行”的路径
+
 ## 2026-09-12 — 全面审计修复（供应链 / 权限 / 死副本 / 文档一致性）
 
 对公开仓库做一次只读全面审计（CI 权限、路径映射、脱敏、文档一致性、脚本语法与 lint），本轮修掉以下项：

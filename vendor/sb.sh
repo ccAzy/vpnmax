@@ -19,6 +19,61 @@ yellow(){ echo -e "\033[33m\033[01m$1\033[0m";}
 blue(){ echo -e "\033[36m\033[01m$1\033[0m";}
 white(){ echo -e "\033[37m\033[01m$1\033[0m";}
 readp(){ read -p "$(yellow "$1")" $2;}
+# ===================================================================
+# vpnmax 冻结层：外部依赖的版本控制
+#   活水（有专业团队维护）→ 只 pin 版本号，不抄代码
+#   冻结（个人维护 + 以 root 执行）→ pin commit + SHA256 校验
+# 任何情况下都不再“裸拉上游 main/latest 后直接 root 执行”。
+# 升级 = 改这里（并把新 SHA256 同步写回），是一次有意识的动作。
+# ===================================================================
+VPNMAX_ACME_COMMIT="e3299a70692c9804df75c168ff3d965659161843"
+VPNMAX_ACME_SHA256="06edab0c64cc1439b5991966184ba04f6e6b1736987bfe7d0fec45b1dc32f247"
+VPNMAX_CFWARP_COMMIT="f2f634ba79452a0ffadcd93a6e6524cf4b7b84df"
+VPNMAX_CFWARP_SHA256="7ebb2eba5c230d22643cdc77fdea0163877abcb0b5dde22b6b227f47523926d9"
+VPNMAX_SINGBOX_PIN="1.13.19"
+VPNMAX_CLOUDFLARED_PIN="2026.8.3"
+VPNMAX_SBWPPH_COMMIT="9e8b710c191d0cfd43f50f3d35d11b5ff0c314bc"
+VPNMAX_SBWPPH_SHA_AMD64="93c7c5d7cb2c82cef44de782ae030b5f8fdb15038e3e95662e451bce7d3ee531"
+VPNMAX_SBWPPH_SHA_ARM64="4a8f0419e4b848b99017128d532bd760f6daa4a7b0bc9f59ff166105db5c6e33"
+
+# 下载并按 SHA256 校验；通过返回 0。失败一律返回 1，调用方不得静默回落上游 main。
+vpnmax_fetch_pinned(){
+local _url="$1" _sha="$2" _out="$3" _label="$4"
+rm -f "$_out"
+if ! curl -fsSL --proto '=https' --tlsv1.2 --retry 2 -o "$_out" "$_url"; then
+red "下载 $_label 失败：$_url"; return 1
+fi
+if ! echo "$_sha  $_out" | sha256sum -c - >/dev/null 2>&1; then
+red "$_label 校验不通过（与 pin 的 SHA256 不一致），已丢弃"; rm -f "$_out"; return 1
+fi
+green "$_label 已校验通过（SHA256 与 pin 一致）"
+return 0
+}
+
+# acme.sh / CFwarp.sh 统一入口：vendor 本地 → pin commit + 校验 → 中止
+vpnmax_run_acme(){
+local _vendor _tmp _rc
+_vendor="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" 2>/dev/null || echo ".")/vendor/acme.sh"
+if [ -s "$_vendor" ]; then bash "$_vendor"; return $?; fi
+_tmp="$(mktemp /tmp/vpnmax-acme.XXXXXX.sh)"
+if vpnmax_fetch_pinned "https://raw.githubusercontent.com/yonggekkk/acme-yg/$VPNMAX_ACME_COMMIT/acme.sh" "$VPNMAX_ACME_SHA256" "$_tmp" "acme.sh"; then
+bash "$_tmp"; _rc=$?; rm -f "$_tmp"; return $_rc
+fi
+red "acme.sh 获取或校验失败，已中止本次证书申请（不会回落裸拉上游 main）"
+return 1
+}
+vpnmax_run_cfwarp(){
+local _vendor _tmp _rc
+_vendor="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" 2>/dev/null || echo ".")/vendor/CFwarp.sh"
+if [ -s "$_vendor" ]; then bash "$_vendor"; return $?; fi
+_tmp="$(mktemp /tmp/vpnmax-cfwarp.XXXXXX.sh)"
+if vpnmax_fetch_pinned "https://raw.githubusercontent.com/yonggekkk/warp-yg/$VPNMAX_CFWARP_COMMIT/CFwarp.sh" "$VPNMAX_CFWARP_SHA256" "$_tmp" "CFwarp.sh"; then
+bash "$_tmp"; _rc=$?; rm -f "$_tmp"; return $_rc
+fi
+red "CFwarp.sh 获取或校验失败，已中止本次 WARP 安装（不会回落裸拉上游 main）"
+return 1
+}
+
 [[ $EUID -ne 0 ]] && yellow "请以root模式运行脚本" && exit
 stty erase $'\b' 2>/dev/null || stty erase '^H' 2>/dev/null
 #[[ -e /etc/hosts ]] && grep -qE '^ *172.65.251.78 gitlab.com' /etc/hosts || echo -e '\n172.65.251.78 gitlab.com' >> /etc/hosts
@@ -222,13 +277,26 @@ yellow "1：使用目前最新正式版内核 (回车默认)"
 yellow "2：使用之前1.10.7正式版内核 (支持geosite分流、IP优选级切换，无Anytls协议)"
 readp "请选择【1-2】：" menu
 if [ -z "$menu" ] || [ "$menu" = "1" ] ; then
+# vpnmax: 默认用 pin 版本（原为跟随上游 latest）
+sbcore="$VPNMAX_SINGBOX_PIN"
+if [ -z "$sbcore" ]; then
 sbcore=$(curl -Ls https://github.com/SagerNet/sing-box/releases/latest | grep -oP 'tag/v\K[0-9.]+' | head -n 1)
+else
+yellow "vpnmax: 使用 pin 版本 sing-box $sbcore"
+fi
 else
 sbcore='1.10.7'
 fi
 sbname="sing-box-$sbcore-linux-$cpu"
-curl -L -o /etc/s-box/sing-box.tar.gz  -# --retry 2 https://github.com/SagerNet/sing-box/releases/download/v$sbcore/$sbname.tar.gz
-if [[ -f '/etc/s-box/sing-box.tar.gz' ]]; then
+curl -fL -o /etc/s-box/sing-box.tar.gz  -# --retry 2 https://github.com/SagerNet/sing-box/releases/download/v$sbcore/$sbname.tar.gz
+# vpnmax: pin 版拉取失败（含 404）时告警并回退 latest，避免 pin 失效导致装不上
+if [[ ! -s '/etc/s-box/sing-box.tar.gz' && -n "$VPNMAX_SINGBOX_PIN" && "$sbcore" = "$VPNMAX_SINGBOX_PIN" ]]; then
+red "pin 版 sing-box $sbcore 拉取失败，回退上游 latest（请核对 pin 是否仍存在）"
+sbcore=$(curl -Ls https://github.com/SagerNet/sing-box/releases/latest | grep -oP 'tag/v\K[0-9.]+' | head -n 1)
+sbname="sing-box-$sbcore-linux-$cpu"
+curl -fL -o /etc/s-box/sing-box.tar.gz  -# --retry 2 https://github.com/SagerNet/sing-box/releases/download/v$sbcore/$sbname.tar.gz
+fi
+if [[ -s '/etc/s-box/sing-box.tar.gz' ]]; then
 tar xzf /etc/s-box/sing-box.tar.gz -C /etc/s-box
 mv /etc/s-box/$sbname/sing-box /etc/s-box
 rm -rf /etc/s-box/{sing-box.tar.gz,$sbname}
@@ -310,14 +378,7 @@ readp "请选择【1-2】：" menu
 if [ -z "$menu" ] || [ "$menu" = "1" ] ; then
 zqzs
 else
-# vpnmax: 优先使用 vendor 本地 acme.sh
-_vendor_acme="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" 2>/dev/null || echo ".")/vendor/acme.sh"
-if [ -s "$_vendor_acme" ]; then
-bash "$_vendor_acme"
-else
-yellow "vendor 缺失 acme.sh，回退上游下载（非 vpnmax 推荐模式）"
-bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/acme-yg/main/acme.sh)
-fi
+vpnmax_run_acme
 if [[ ! -f /root/ygkkkca/cert.crt && ! -f /root/ygkkkca/private.key && ! -s /root/ygkkkca/cert.crt && ! -s /root/ygkkkca/private.key ]]; then
 red "Acme证书申请失败，继续使用自签证书" 
 zqzs
@@ -2393,8 +2454,15 @@ case $(uname -m) in
 aarch64) cpu=arm64;;
 x86_64) cpu=amd64;;
 esac
-curl -L -o /etc/s-box/cloudflared -# --retry 2 https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$cpu
-#curl -L -o /etc/s-box/cloudflared -# --retry 2 https://gitlab.com/rwkgyg/sing-box-yg/-/raw/main/$cpu
+# vpnmax: 版本 pin（与 verify.sh 的 G6 断言保持一致）；pin 拉不到才告警回退 latest
+if [ -n "$VPNMAX_CLOUDFLARED_PIN" ]; then
+yellow "vpnmax: 使用 pin 版本 cloudflared $VPNMAX_CLOUDFLARED_PIN"
+curl -fL -o /etc/s-box/cloudflared -# --retry 2 "https://github.com/cloudflare/cloudflared/releases/download/$VPNMAX_CLOUDFLARED_PIN/cloudflared-linux-$cpu"
+fi
+if [[ ! -s /etc/s-box/cloudflared ]]; then
+red "cloudflared pin 版拉取失败，回退上游 latest"
+curl -fL -o /etc/s-box/cloudflared -# --retry 2 "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$cpu"
+fi
 chmod +x /etc/s-box/cloudflared
 fi
 }
@@ -3943,7 +4011,8 @@ iptables -t nat -F PREROUTING >/dev/null 2>&1
 netfilter-persistent save >/dev/null 2>&1
 service iptables save >/dev/null 2>&1
 green "Sing-box卸载完成！"
-blue "欢迎继续使用Sing-box-yg脚本：bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/sb.sh)"
+blue "vpnmax 冻结层：如需重装或继续管理，请用本仓脚本（不要跑上游 sb.sh，那会覆盖本仓锁定的 vendor 版本）"
+blue "  bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_singbox.sh)"
 echo
 }
 
@@ -4031,38 +4100,25 @@ fi
 }
 
 acme(){
-# vpnmax: 优先使用 vendor 本地 acme.sh
-_vendor_acme="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" 2>/dev/null || echo ".")/vendor/acme.sh"
-if [ -s "$_vendor_acme" ]; then
-bash "$_vendor_acme"
-else
-yellow "vendor 缺失 acme.sh，回退上游下载（非 vpnmax 推荐模式）"
-bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/acme-yg/main/acme.sh)
-fi
+vpnmax_run_acme
 }
 cfwarp(){
-# vpnmax: 优先使用 vendor 本地 CFwarp.sh
-_vendor_cfwarp="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" 2>/dev/null || echo ".")/vendor/CFwarp.sh"
-if [ -s "$_vendor_cfwarp" ]; then
-bash "$_vendor_cfwarp"
-else
-yellow "vendor 缺失 CFwarp.sh，回退上游下载（非 vpnmax 推荐模式）"
-bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/warp-yg/main/CFwarp.sh)
-fi
+vpnmax_run_cfwarp
 }
 bbr(){
 if [[ $vi =~ lxc|openvz ]]; then
 yellow "当前VPS的架构为 $vi，不支持开启原版BBR加速" && sleep 2 && exit 
 else
-green "点击任意键，即可开启BBR加速，ctrl+c退出"
-# vpnmax: 优先使用 vendor 本地 bbr.sh
-_vendor_bbr="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" 2>/dev/null || echo ".")/vendor/bbr.sh"
-if [ -s "$_vendor_bbr" ]; then
-bash "$_vendor_bbr"
-else
-yellow "vendor 缺失 bbr.sh，回退上游下载（非 vpnmax 推荐模式）"
-bash <(curl -Ls https://raw.githubusercontent.com/teddysun/across/master/bbr.sh)
-fi
+# vpnmax: 本函数原为拉取 teddysun/across 的 bbr.sh 执行。vpnmax 已自建 BBR 开启逻辑
+# （deploy_optimize.sh + lib/optimize.sh），且那份外部脚本会覆盖本项目的 TCP buffer
+# 调优参数（两套系统写同一批 sysctl 键）。故改为本地最小实现：只设 fq + bbr，
+# 幂等，写入 vpnmax 自己的 sysctl.d 文件，不拉任何上游脚本。
+modprobe tcp_bbr 2>/dev/null || true
+printf 'net.core.default_qdisc=fq\nnet.ipv4.tcp_congestion_control=bbr\n' > /etc/sysctl.d/99-vpnmax-bbr.conf
+sysctl --system >/dev/null 2>&1 || true
+green "BBR 已开启（vpnmax 本地实现，无上游依赖）"
+yellow "如需内核级/带宽调优，请运行本项目的 deploy_optimize.sh"
+sleep 2
 fi
 }
 
@@ -4190,24 +4246,29 @@ case $(uname -m) in
 aarch64) cpu=arm64;;
 x86_64) cpu=amd64;;
 esac
-# vpnmax: 优先使用 vendor 本地 sbwpph_${cpu}。
-# ⚠️ 现状说明（勿当已修）：vendor/sbwpph_* 并未入仓，所以本 if 恒为假，实际总是走下面的上游回退分支。
-# 本分支也没有任何 SHA256 校验代码（原注释声称有，属误描述，已改正）。
+# vpnmax: sbwpph 二进制（~24MB，不入仓）。vendor 本地件优先，否则 pin commit + 逐架构 SHA256 校验。
 _vendor_sbwpph="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" 2>/dev/null || echo ".")/vendor/sbwpph_${cpu}"
 if [ -s "$_vendor_sbwpph" ]; then
 cp -f "$_vendor_sbwpph" /etc/s-box/sbwpph
 chmod +x /etc/s-box/sbwpph
 green "使用 vendor 本地 sbwpph_${cpu}"
 else
-yellow "vendor 缺失 sbwpph_${cpu}，回退上游下载（非 vpnmax 推荐模式）"
-# 安全：去掉原先的 --insecure（它等于关闭 TLS 证书校验，字节可被中间人篡改后再 root 执行）
-# 仅允许 https + TLS1.2+，下载失败则中止本组件，不留下半成品二进制。
-if ! curl -fL --proto '=https' --tlsv1.2 -o /etc/s-box/sbwpph -# --retry 2 https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/sbwpph_$cpu; then
-red "sbwpph 下载失败（TLS 校验不通过或网络不可达），已中止，未安装该组件"
-rm -f /etc/s-box/sbwpph
+case "$cpu" in
+amd64) _sbwpph_sha="$VPNMAX_SBWPPH_SHA_AMD64";;
+arm64) _sbwpph_sha="$VPNMAX_SBWPPH_SHA_ARM64";;
+*) _sbwpph_sha="";;
+esac
+if [ -z "$_sbwpph_sha" ]; then
+red "未知架构 $cpu，无法校验 sbwpph，已中止"
 return 1
 fi
+yellow "vendor 缺失 sbwpph_${cpu}，改用 pin commit + SHA256 校验后安装"
+if vpnmax_fetch_pinned "https://raw.githubusercontent.com/yonggekkk/sing-box-yg/$VPNMAX_SBWPPH_COMMIT/sbwpph_$cpu" "$_sbwpph_sha" "/etc/s-box/sbwpph" "sbwpph_$cpu"; then
 chmod +x /etc/s-box/sbwpph
+else
+red "sbwpph 获取或校验失败，已中止（不安装未经校验的二进制）"
+return 1
+fi
 fi
 fi
 ps -ef | grep '[s]bwpph' | awk '{print $2}' | xargs kill 2>/dev/null

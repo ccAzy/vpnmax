@@ -97,8 +97,11 @@ MANIFEST="/var/log/vpnmax-singbox-manifest.log"
 SB_COMMIT="5001e76efc9e15eac1f8ff33a0b389172e331e1d"
 # SB_SHA256 对应的是“上游 commit + vpnmax 本地 patch”之后的文件。
 # 每次改 vendor/sb.sh 都必须同步重算本常量，否则安装时校验失败拒绝安装。
-# 2026-09-12 本地 patch：inssbwpph() 的回退下载去掉 --insecure（强制 https + TLS1.2，失败即中止）。
-SB_SHA256="9b5f4b91ce892dc9db89c8dfaf2460ee5136a63e38a3abcd04a19e2f8d0a50c3"
+# 2026-09-12 本地 patch（冻结层）：
+#   ① acme.sh / CFwarp.sh / sbwpph 改为 pin commit + SHA256 校验（不再裸拉上游 main 后 root 执行）
+#   ② 版本 pin：sing-box 1.13.19 / cloudflared 2026.8.3 / cfst v2.3.5（pin 拉不到才告警回退 latest）
+#   ③ bbr() 改本地最小实现（不再拉 teddysun/across，避免覆盖本项目的 TCP buffer 调优）
+SB_SHA256="99b8a4e5b06c64ac0f2ed190e5207cc42932acdaa8c683716d687b8e31d5ec08"
 SB_URL="https://raw.githubusercontent.com/ccAzy/vpnmax/main/vendor/sb.sh"
 
 RED='\033[0;31m'

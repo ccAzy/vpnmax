@@ -7,6 +7,7 @@ set -euo pipefail
 STATE_FILE="/etc/s-box/edge-monitor.state"
 EXTRA_CONF="/etc/s-box/argo-extra.conf"
 CFST_BIN="/usr/local/bin/cfst"
+CFST_PIN="v2.3.5" # vpnmax: 固定版本（原为跟随 latest）；升级 = 改这里
 LOG="/etc/s-box/edge-monitor.log"
 LOCK="/var/lock/vpnmax-edge-monitor.lock"
 
@@ -160,18 +161,36 @@ trigger_optimization() {
     # 下载 CFST (如果不存在)
     if [ ! -f "$CFST_BIN" ]; then
         info "下载 CloudflareSpeedTest..."
-        local cfst_url="https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/cfst_linux_amd64.tar.gz"
+        # vpnmax: ①固定版本（原为 latest）②按架构取包（原硬编码 amd64，arm64 机器会装错架构的二进制）
+        local cfst_arch
+        case "$(uname -m)" in
+            aarch64|arm64) cfst_arch=arm64 ;;
+            *) cfst_arch=amd64 ;;
+        esac
+        local cfst_file="cfst_linux_${cfst_arch}.tar.gz"
+        local cfst_url="https://github.com/XIU2/CloudflareSpeedTest/releases/download/${CFST_PIN}/${cfst_file}"
         local tmp_dir="/tmp/cfst"
         mkdir -p "$tmp_dir"
 
-        if curl -fsSL --max-time 60 "$cfst_url" -o "$tmp_dir/cfst.tar.gz" 2>/dev/null; then
-            tar -xzf "$tmp_dir/cfst.tar.gz" -C "$tmp_dir" 2>/dev/null
+        # 先取 pin 版；失败则告警回退 latest，避免 pin 失效后永远装不上
+        if ! curl -fsSL --max-time 60 "$cfst_url" -o "$tmp_dir/cfst.tar.gz" 2>/dev/null; then
+            warn "pin 版 CFST ${CFST_PIN} 下载失败，回退上游 latest"
+            cfst_url="https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/${cfst_file}"
+            if ! curl -fsSL --max-time 60 "$cfst_url" -o "$tmp_dir/cfst.tar.gz" 2>/dev/null; then
+                rm -rf "$tmp_dir"
+                error "CFST 下载失败"
+                return 1
+            fi
+        fi
+
+        if tar -xzf "$tmp_dir/cfst.tar.gz" -C "$tmp_dir" 2>/dev/null && [ -f "$tmp_dir/cfst" ]; then
             mv "$tmp_dir/cfst" "$CFST_BIN" 2>/dev/null
             chmod +x "$CFST_BIN" 2>/dev/null
             rm -rf "$tmp_dir"
-            info "CFST 下载完成"
+            info "CFST 下载完成（${cfst_arch} / ${cfst_url##*/}）"
         else
-            error "CFST 下载失败"
+            rm -rf "$tmp_dir"
+            error "CFST 解包失败"
             return 1
         fi
     fi

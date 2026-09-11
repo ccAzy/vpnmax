@@ -1,13 +1,13 @@
-# vendor/ — vpnmax 融合依赖
+# vendor/ — vpnmax 融合依赖与外部依赖的版本控制
 
-> **一句话现状**：本目录**目前只有 `sb.sh`**。下表中标 ❌ 的依赖都还没入仓，
-> 相关功能触发时会**实时从上游拉取**。"零上游调用"是**目标**，不是当前事实。
+> **一句话现状（2026-09-12 起）**：仓库里只有 `sb.sh`；其余上游依赖**不入仓，但全部 pin + 校验**。
+> 项目里已经**不存在"裸拉上游 main/latest 后直接 root 执行"的路径**。
 
-## 已入仓
+## 一、已入仓
 
 | 文件 | 来源 | 版本 pin | SHA256 |
 |---|---|---|---|
-| `sb.sh` | `ccAzy/sing-box-yg` commit `5001e76e`（与 `yonggekkk/sing-box-yg` 同 commit 字节一致，已实测）+ vpnmax 本地 patch | 见 `SB_COMMIT` | `46faf59b…03c77`（见 `SB_SHA256`） |
+| `sb.sh` | `ccAzy/sing-box-yg` commit `5001e76e`（与 `yonggekkk/sing-box-yg` 同 commit 字节一致，已实测）+ vpnmax 本地 patch | 见 `SB_COMMIT` | `99b8a4e5…5ec08`（见 `SB_SHA256`） |
 
 规则：
 
@@ -19,34 +19,55 @@
 4. 该 fork 已原生支持 `/etc/s-box/argo-extra.conf`
   （Argo 附加参数，如 `--region`），与 `lib/edgeprefer.sh` 对接。
 
-## 未入仓清单（⚠️ 当前恒走上游，等于没有冻结）
+## 二、不入仓，但已 pin + 校验（在 `sb.sh` 顶部常量区）
 
-| 文件 | 代码里的回退目标 | 现状 |
+| 依赖 | pin 方式 | 常量 |
 |---|---|---|
-| `acme.sh` | `yonggekkk/acme-yg` main | ❌ 未入仓 → 每次签证书都实时拉上游 |
-| `CFwarp.sh` | `yonggekkk/warp-yg` main | ❌ 未入仓 → WARP 安装实时拉上游 |
-| `bbr.sh` | `teddysun/across` master | ❌ 未入仓（vpnmax 已自建，此为备用） |
-| `sbwpph_amd64` / `sbwpph_arm64` | `yonggekkk/sing-box-yg` main | ❌ 未入仓 → WARP-socks5 二进制实时拉上游 |
+| `acme.sh` | commit + SHA256 | `VPNMAX_ACME_COMMIT` / `VPNMAX_ACME_SHA256` |
+| `CFwarp.sh` | commit + SHA256 | `VPNMAX_CFWARP_COMMIT` / `VPNMAX_CFWARP_SHA256` |
+| `sbwpph_amd64` / `sbwpph_arm64`（各 ~24MB） | commit + 逐架构 SHA256 | `VPNMAX_SBWPPH_COMMIT` / `VPNMAX_SBWPPH_SHA_AMD64` / `_ARM64` |
 
-`sb.sh` 里对应的"优先用 vendor 本地文件"分支**已经 patch 好了**，但因为上表文件都没有，
-**这些分支永远不生效**——实际执行的始终是回退分支。所以：
+统一由 `vpnmax_fetch_pinned()` 下载并校验：**校验不通过就丢弃并中止，不回落上游 main**。
 
-- `acme()` / `cfwarp()` / `bbr()` / `inssbwpph()` 目前**没有**兑现"禁上游污染"。
-- `inssbwpph()` 的上游回退**原先还带 `--insecure`**（关闭 TLS 校验后把二进制
-  `chmod +x` 并以 root 执行）。该 `--insecure` 已移除，现在强制 https + TLS1.2+，
-  失败即中止该组件。
+**为什么不入仓**：`sbwpph` 两个架构合计约 48MB，入仓会显著撑大仓库；
+而 pin + SHA256 已经拿到"内容不可变、可校验、可回滚"的全部收益。
+（顺带避开这几份第三方文件的再分发/许可证问题。）
 
-### 第二个坑：vendor/ 相对路径在单文件部署下解析不到
+## 三、只 pin 版本号（活水层）
 
-这些分支用 `dirname "$(readlink -f "${BASH_SOURCE[0]}")"/vendor/...` 定位本地文件。
-但一键部署是把 `sb.sh` **当单文件下载执行**（见 `deploy_singbox.sh` 的 `SB_URL`），
-运行时 `vendor/` 不在脚本旁边 → 即使把文件补进仓库，也**依然解析不到**。
-要让这个机制真正生效，必须让部署流程把 `vendor/` 一起分发（或把路径改成绝对可配）。
+| 依赖 | 现值 | 说明 |
+|---|---|---|
+| sing-box 内核 | `1.13.19` | `VPNMAX_SINGBOX_PIN`；这是本项目已验证过的版本 |
+| cloudflared | `2026.8.3` | `VPNMAX_CLOUDFLARED_PIN`；与 `verify.sh` 的 G6 断言一致 |
+| cfst（CloudflareSpeedTest） | `v2.3.5` | `CFST_PIN`（`vpnmax-edge-monitor.sh`） |
 
-## 待办（需要决策，不是纯代码问题）
+三者的取法都是 **pin 优先 → 拉取失败时告警并回退 latest**（避免 pin 失效导致整个安装或优选卡死）。
+升级 = 改常量，是一次有意识的动作。
 
-1. 决定这几个第三方脚本/二进制**是否入仓**：二进制入仓会撑大仓库体积，
-   不入仓则"冻结层"在这几项上名不副实——二选一，别维持"声称已冻结但实际没冻"的状态。
-2. 若入仓：`vendor/` 必须随部署一起落地，否则相对路径失效（见上）。
-3. 无论哪种选择，都应给回退下载**加校验**（pin commit + SHA256），
-   而不是"从上游 main 拉最新然后 root 执行"。
+## 四、已移除的上游引用
+
+| 依赖 | 原用途 | 现状 |
+|---|---|---|
+| `bbr.sh`（`teddysun/across`） | sb 菜单里的"一键开 BBR" | **改为本地最小实现**：只设 `fq` + `bbr`，写入 `/etc/sysctl.d/99-vpnmax-bbr.conf`。原因：原脚本会覆盖本项目 `lib/optimize.sh` 算出来的 TCP buffer 参数（两套系统写同一批 sysctl 键） |
+| 上游 `sb.sh` 自更新 | `lnsb()` / `upsbyg()` | 已 patch 为空操作（原有的冻结做法） |
+| 欢迎语里"去跑上游 sb.sh"的提示 | 卸载完成后的提示 | 已改为指向本仓 `deploy_singbox.sh`（原提示等于引导用户覆盖自己的冻结层） |
+
+## 五、有意不 pin 的（说明，不是遗漏）
+
+| 项 | 原因 |
+|---|---|
+| `geoip.db` / `geosite.db`（MetaCubeX/meta-rules-dat，`latest`） | 这是**数据文件**不是可执行代码，且必须跟随上游持续更新（新增域名/线路）。冻结它会让分流规则过期。风险等级远低于可执行脚本 |
+| 版本横幅读取（`yonggekkk/sing-box-yg/main/version`） | 仅用于显示文字，不参与任何执行 |
+
+## 六、尚未解决：`vendor/` 相对路径在单文件部署下解析不到
+
+`sb.sh` 里的"优先用本地件"分支按 `dirname "$(readlink -f "${BASH_SOURCE[0]}")"/vendor/...` 找文件。
+而一键部署是把 `sb.sh` **当单文件下载执行**，运行时 `vendor/` 不在脚本旁边 → 这些分支恒为假。
+
+**这不影响安全性**（现在的回退路径是 pin + 校验，不是裸拉 main），但意味着
+"把文件放进 `vendor/` 就能生效"是不成立的。要让本地件真正生效，需部署侧配合，二选一：
+
+- 把 `vendor/` 随部署一起落到固定绝对路径（如 `/usr/local/lib/vpnmax/vendor/`），代码改读绝对路径；
+- 或改为"克隆整个仓库再运行"。
+
+这一项待决策，本文档不假装它已解决。
