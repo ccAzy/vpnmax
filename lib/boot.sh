@@ -23,7 +23,7 @@ VPNMAX_LIB_HOME="${VPNMAX_LIB_HOME:-/usr/local/lib/vpnmax}"
 VPNMAX_RAW="${VPNMAX_RAW:-https://raw.githubusercontent.com/ccAzy/vpnmax/main}"
 
 # 全部模块（含 verify 子目录）；顺序即依赖顺序
-VPNMAX_MODULES_ALL="common time hardening firewall singbox subscription argo warp optimize edgeprefer"
+VPNMAX_MODULES_ALL="common time hardening firewall singbox subscription argo warp optimize"
 VPNMAX_MODULES_VERIFY="verify/time verify/tuic"
 # vendor/ 里随部署落盘的冻结件（单文件模式下也能命中"vendor 优先、零上游"）
 VPNMAX_VENDOR_FILES="sb.sh"

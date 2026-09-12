@@ -19,7 +19,6 @@ description: >
 | `verify.sh` | 部署后验证（进程/端口/BBR/fq/网卡/独立链/Argo/订阅/域名分流/调优缺口回归） |
 | `lib/boot.sh` | **引导层** — 定位 lib 来源，缺失则自举取回（全项目唯一引导代码） |
 | `lib/hardening.sh` | 安全 sysctl（网络感知 RA）+ systemd LimitNOFILE |
-| `lib/edgeprefer.sh` | CF 边缘优选（扫段→测延迟→colo/家族选择，写 argo-extra.conf） |
 | `vendor/sb.sh` | 自带 sing-box-yg（与 pin SHA 一致，零上游安装） |
 
 ## 核心安全设计（相对 ACVPN 的关键差异）

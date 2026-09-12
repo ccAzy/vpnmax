@@ -250,7 +250,6 @@ lib/singbox.sh     # sb_feed / sb 安装
 lib/subscription.sh# KEEP_PORT + RESET_SUB
 lib/argo.sh        # Argo + keepalive v3
 lib/warp.sh        # WARP + 分流
-lib/edgeprefer.sh  # CF 边缘优选
 lib/verify/        # verify 侧 time/tuic 回环 204
 ```
 
@@ -376,7 +375,6 @@ curl -v http://127.0.0.1:订阅端口/token/clmi.yaml
   - 注意：`vendor/` 目前只有 `sb.sh`。`acme.sh` / `CFwarp.sh` / `bbr.sh` / `sbwpph` **尚未入仓**，用到这些功能时仍会实时拉取上游，详见 `vendor/README.md` 的“未入仓清单”。
 - **BBR 内核自供**：流水线在 `.github/workflows/build-bbrv3.yml`（每日定时构建发 release）；`kernel/` 只是构建工作目录（clone 的内核源码与 deb 不入仓）。部署默认从本仓 release 拉 deb，首个构建落地前桥接回退老仓（warn 标明）。
 - **智能带宽调优**：移植自 byJoey，自动测速 + 按区域（亚太/美欧）+ 内存上限动态算 TCP buffer，`VPNMAX_BUFFER_MODE` 可控。
-- **边缘优选**：`lib/edgeprefer.sh` 在 Argo 启动前采样官方段，选最优 colo 与 v4/v6 家族，经 `argo-extra.conf` 注入隧道；`EDGE_PREFER=off` 可跳过，`ARGO_REGION=xx` 可手动 pin region。
 - **出口 prefer_ipv4 常态化**：不再仅 `--force` 才修，幂等对齐。
 - **verify 1c 回归**：SSH/旧残留/内核/cloudflared pin 版/订阅-隧道一致性。
 

@@ -16,8 +16,8 @@
    绝不调上游 `yonggekkk`。同样 SHA256 校验。
 3. 升级 sb 时：更新本文件 + 同步 `SB_COMMIT`/`SB_SHA256` 两个常量，
    否则校验失败拒绝安装（有意设计）。
-4. 该 fork 已原生支持 `/etc/s-box/argo-extra.conf`
-  （Argo 附加参数，如 `--region`），与 `lib/edgeprefer.sh` 对接。
+4. 该 fork 已原生支持 `/etc/s-box/argo-extra.conf`（Argo 附加参数，如 `--edge-ip-version 4`）。
+   本项目**不做自动优选**；需要固定时由人手写该文件（`lib/argo.sh` 的 `ensure_argo_extra_applied` 会把它对齐到运行中的隧道）。
 
 ## 二、不入仓，但已 pin + 校验（在 `sb.sh` 顶部常量区）
 
@@ -39,7 +39,7 @@
 |---|---|---|
 | sing-box 内核 | `1.13.19` | `VPNMAX_SINGBOX_PIN`；这是本项目已验证过的版本 |
 | cloudflared | `2026.8.3` | `VPNMAX_CLOUDFLARED_PIN`；与 `verify.sh` 的 G6 断言一致 |
-| cfst（CloudflareSpeedTest） | `v2.3.5` | `CFST_PIN`（`vpnmax-edge-monitor.sh`） |
+| cfst（CloudflareSpeedTest） | `v2.3.5` | `CFST_PIN`（在 `vendor/sb.sh` 内部使用） |
 
 三者的取法都是 **pin 优先 → 拉取失败时告警并回退 latest**（避免 pin 失效导致整个安装或优选卡死）。
 升级 = 改常量，是一次有意识的动作。

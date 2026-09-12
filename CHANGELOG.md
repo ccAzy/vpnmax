@@ -1,5 +1,57 @@
 # Changelog
 
+## 2026-09-12 — 砍掉「测速优选」方向（保留部署 / 保活 / 验证）
+
+**决定依据（用户的判断，我原本方向错了）**：完整链路是
+
+```
+本机 ──①运营商/国际出口──> CF 边缘 ──②──> cloudflared ──> VPS ──> 目标网站
+```
+
+服务器侧「经隧道测速」测的是 **②**，而 **② 是整条链上最不容易出问题的一段**（VPS 在国外机房，
+到 Cloudflare 是干净的机房互联）。真正决定体感的是 **①**：家宽、晚高峰国际出口、QoS、UDP 封锁。
+**在 VPS 上测，大概率测出「很快」，然后误导人** —— 等于答错了题。
+
+客户端优选（本地解析到指定 CF IP、SNI 仍用域名）技术上可行，但收益必须由用户在自己网络上反复实测；
+而用户 2026-09-12 已明确「不要自动测速、手动选节点够用」。故**整个方向不做**。
+
+**删除（合计 1624 行）**
+
+| 文件 | 行数 | 原因 |
+| --- | --- | --- |
+| `vpnmax-speed-test.sh` | 210 | 纯测速，且位置在服务器侧 |
+| `vpnmax-edge-monitor.sh` | 467 | 测速优选宿主（其保活职责已由 `install_argo_keepalive` 覆盖） |
+| `vpnmax-edge-monitor.service` | 20 | 同上 |
+| `install-edge-monitor.sh` | 204 | 同上安装器 |
+| `migrate-to-edge-monitor.sh` | 167 | 迁移到该系统的脚本 |
+| `cloudflared-argo-start.sh` / `cloudflared-argo.service` | 59 + 21 | 该系统的启动单元（与 cron 保活的 `nohup cloudflared` 重复） |
+| `README-edge-monitor.md` | 256 | 其文档 |
+| `lib/edgeprefer.sh` | 121 | CF 段扫描 + colo 优选引擎 |
+| `docs/reference/cfdata-scanOfficialIP.go.txt` | 99 | 仅为 edgeprefer 保留的参考 |
+
+**保留（以及为什么）**
+
+- `lib/argo.sh` 的 `install_argo_keepalive` —— 现役保活（flock 互斥 + 进程/HTTP 双检 + 僵死重连 +
+  翻动冷却 + 订阅同步）。它跟「测不测速」无关，是可用性刚需。
+- `ensure_argo_extra_applied` + `/etc/s-box/argo-extra.conf` —— 从「自动优选的输出端」降级为
+  **手工 pin 口子**（例如 `--edge-ip-version 4`），不再由任何脚本自动写入。
+- `deploy_optimize.sh` 的智能带宽调优 —— 它测的是 **VPS 出口带宽**，用途是**算 TCP buffer 大小**，
+  属于配置计算而非质量评估，与本次砍的方向不是一回事。
+- `verify.sh` 的隧道存活检查。
+
+**给已装过 Edge Monitor 的机器（卸载指引）**
+
+```bash
+systemctl disable --now vpnmax-edge-monitor cloudflared-argo 2>/dev/null
+rm -f /usr/local/sbin/vpnmax-edge-monitor.sh /usr/local/sbin/cloudflared-argo-start.sh       /etc/systemd/system/vpnmax-edge-monitor.service /etc/systemd/system/cloudflared-argo.service
+systemctl daemon-reload
+# cron 保活（install_argo_keepalive 装的 /usr/local/sbin/vpnmax-argo-keepalive.sh）保留即可
+```
+
+**验证**：`bash -n` 全通过；shellcheck 自有代码 0 告警；完整性门禁 R1–R5 全绿；
+WSL 实机跑通仓库模式加载（模块清单已去 edgeprefer、`ensure_edge_prefer` 确认移除）与
+单文件自举（rc=0，落 10 个 lib + 2 个 verify + `vendor/sb.sh`）；全仓无残留引用。
+
 ## 2026-09-12 — 消除「双实现」：lib/ 成为唯一源码，单文件改为运行时自举
 
 **背景（为什么不是继续修漂移）**：上一轮修完 11 处漂移后，检查器仍报 10 处同名不同实现未决，

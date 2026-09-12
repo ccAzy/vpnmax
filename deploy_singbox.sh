@@ -219,7 +219,6 @@ main() {
     config_port_hopping || true
 
     step "4" "Argo 临时隧道"
-    if declare -F ensure_edge_prefer >/dev/null 2>&1; then ensure_edge_prefer || true; else warn "edgeprefer 未加载，跳过边缘优选"; fi
     start_argo || DEPLOY_OK=false
     install_argo_keepalive
     if declare -F ensure_argo_extra_applied >/dev/null 2>&1; then ensure_argo_extra_applied || true; fi
