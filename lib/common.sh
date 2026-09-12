@@ -2,27 +2,36 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # lib/common.sh — 统一日志/运行/清单，供所有部署脚本 source
 # 保持幂等：重复 source 不重复定义
+# shellcheck disable=SC2034 # 颜色常量是给入口脚本用的（如 deploy_optimize.sh 的 banner），跨文件 shellcheck 看不到
 [ -n "${VPNMAX_COMMON_LOADED:-}" ] && return 0
 VPNMAX_COMMON_LOADED=1
 
 # 颜色与日志（若已定义则不覆盖）
-RED=${RED:-'\033[0;31m'}
-GREEN=${GREEN:-'\033[0;32m'}
-YELLOW=${YELLOW:-'\033[1;33m'}
-CYAN=${CYAN:-'\033[0;36m'}
-WHITE=${WHITE:-'\033[1;37m'}
-N=${N:-'\033[0m'}
+# 颜色只在交互终端启用：被管道/重定向/写日志时不吐转义码（否则日志里全是 ^[[0;36m）
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    RED=$'[0;31m' GREEN=$'[0;32m' YELLOW=$'[1;33m'
+    CYAN=$'[0;36m' WHITE=$'[1;37m' N=$'[0m'
+else
+    RED='' GREEN='' YELLOW='' CYAN='' WHITE='' N=''
+fi
 
 # 统一日志函数（唯一来源；入口脚本不再各抄一份，故不加 declare -F 守卫——
 # 守卫会让残留的旧副本悄悄胜出，制造「改 lib 不生效」）
-info() { echo -e "${CYAN}[*]${N}   $*"; }
-ok() { echo -e "${GREEN}[✓]${N}   $*"; }
-warn() { echo -e "${YELLOW}[!]${N}   $*"; }
-fail() { echo -e "${RED}[✗]${N}   $*"; }
+# 状态前缀一律 3 列 ASCII：✓ / ✗ 是宽字符，渲染宽度随终端字体而变（1~2 列），
+# 会让整段输出参差；ASCII 在任何字体下都严格对齐。
+info() { printf '%s[*]%s   %s
+' "$CYAN" "$N" "$*"; }
+ok() { printf '%s[+]%s   %s
+' "$GREEN" "$N" "$*"; }
+warn() { printf '%s[!]%s   %s
+' "$YELLOW" "$N" "$*"; }
+fail() { printf '%s[x]%s   %s
+' "$RED" "$N" "$*"; }
 
 # 脏数据/清理场景需要「报错并终止」的变体
 die() {
-    echo -e "${RED}[✗]${N}   $*"
+    printf '%s[x]%s   %s
+' "$RED" "$N" "$*"
     exit 1
 }
 

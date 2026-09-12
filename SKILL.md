@@ -80,7 +80,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_opt
 ### 第 2 步：部署 sing-box（重启后）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_singbox.sh | bash
+bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_singbox.sh)
 ```
 
 自动完成：
@@ -132,7 +132,7 @@ bash verify.sh
 | ------ | ------ | ------ |
 | 清理 | `bash cleanup.sh --force` | `[ ! -d /etc/s-box ]` |
 | 第1步 | `bash deploy_optimize.sh` | 重启后 `uname -r` 含 `bbrv3` |
-| 第2步 | `curl .../deploy_singbox.sh \| bash` | `which sb && [ -d /etc/s-box ]` |
+| 第2步 | `bash <(curl .../deploy_singbox.sh)` | `which sb && [ -d /etc/s-box ]` |
 | 订阅 | `printf "3\n8\n1\n\n\n0\n0\n" \| sb` | `[ -f /etc/s-box/subport.log ]` |
 | Hysteria2 | `printf "4\n3\n2\n40000:42000\n0\n" \| sb` | `ss -ulnp \| grep sing-box` |
 | Argo | `printf "3\n3\n1\n1\n0\n" \| sb` | `grep trycloudflare /etc/s-box/argo.log` |

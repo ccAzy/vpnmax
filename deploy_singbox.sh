@@ -23,7 +23,7 @@ SCRIPT_DIR="$VPNMAX_SCRIPT_DIR"
     VPNMAX_LIB_HOME="${VPNMAX_LIB_HOME:-/usr/local/lib/vpnmax}"
     mkdir -p "$VPNMAX_LIB_HOME" || true
     curl -fsSL "${VPNMAX_RAW:-https://raw.githubusercontent.com/ccAzy/vpnmax/main}/lib/boot.sh" -o "$VPNMAX_LIB_HOME/boot.sh" || {
-        printf '[✗] vpnmax: 无法获取引导脚本（检查网络，或改用 git clone 后运行）\n' >&2
+        printf '[x] vpnmax: 无法获取引导脚本（检查网络，或改用 git clone 后运行）\n' >&2
         exit 1
     }
     . "$VPNMAX_LIB_HOME/boot.sh"
@@ -51,7 +51,11 @@ for arg in "$@"; do
     --help | -h)
         cat <<'HELP'
 vpnmax deploy_singbox.sh — sing-box 一键部署
-用法: bash deploy_singbox.sh [--dry-run] [--reset-sub] [--force]
+用法:
+  bash deploy_singbox.sh [选项]        # 仓库模式 / 已下载
+  bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_singbox.sh) [选项]   # 一键
+
+参数: bash deploy_singbox.sh [--dry-run] [--reset-sub] [--force]
   --dry-run  只打印将执行的动作，不实际修改系统
   --reset-sub 强制轮转订阅（删除旧 subport/subtoken，生成全新 token/端口）
              等价 RESET_SUB=1 bash deploy_singbox.sh，暴露后一键换链
@@ -81,7 +85,7 @@ SB_URL="https://raw.githubusercontent.com/ccAzy/vpnmax/main/vendor/sb.sh"
 # ── 环境预检 + 第二阶段依赖兜底 ──
 check_env() {
     if [ "$(id -u)" -ne 0 ]; then
-        fail "需要 root 权限"
+        fail "需要 root 权限。请先 sudo -i 切到 root，或在本条命令最前面加 sudo，然后重跑。"
         return 1
     fi
     if ! command -v apt-get &>/dev/null; then

@@ -18,7 +18,7 @@ SCRIPT_DIR="$VPNMAX_SCRIPT_DIR"
     VPNMAX_LIB_HOME="${VPNMAX_LIB_HOME:-/usr/local/lib/vpnmax}"
     mkdir -p "$VPNMAX_LIB_HOME" || true
     curl -fsSL "${VPNMAX_RAW:-https://raw.githubusercontent.com/ccAzy/vpnmax/main}/lib/boot.sh" -o "$VPNMAX_LIB_HOME/boot.sh" || {
-        printf '[✗] vpnmax: 无法获取引导脚本（检查网络，或改用 git clone 后运行）\n' >&2
+        printf '[x] vpnmax: 无法获取引导脚本（检查网络，或改用 git clone 后运行）\n' >&2
         exit 1
     }
     . "$VPNMAX_LIB_HOME/boot.sh"

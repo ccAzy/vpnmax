@@ -2,7 +2,11 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # ===================================================================
 # vpnmax — 环境准备与依赖检查
-# 用法: bash bootstrap.sh [--dry-run] [--check-only]
+# 用法:
+  bash bootstrap.sh [选项]        # 仓库模式 / 已下载
+  bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/bootstrap.sh) [选项]   # 一键
+
+参数: bash bootstrap.sh [--dry-run] [--check-only]
 #
 # 只负责准备 Debian/Ubuntu VPS 的基础工具，不安装内核、不部署 sing-box、
 # 不修改防火墙、不重启机器。
@@ -19,7 +23,7 @@ SCRIPT_DIR="$VPNMAX_SCRIPT_DIR"
     VPNMAX_LIB_HOME="${VPNMAX_LIB_HOME:-/usr/local/lib/vpnmax}"
     mkdir -p "$VPNMAX_LIB_HOME" || true
     curl -fsSL "${VPNMAX_RAW:-https://raw.githubusercontent.com/ccAzy/vpnmax/main}/lib/boot.sh" -o "$VPNMAX_LIB_HOME/boot.sh" || {
-        printf '[✗] vpnmax: 无法获取引导脚本（检查网络，或改用 git clone 后运行）\n' >&2
+        printf '[x] vpnmax: 无法获取引导脚本（检查网络，或改用 git clone 后运行）\n' >&2
         exit 1
     }
     . "$VPNMAX_LIB_HOME/boot.sh"
@@ -52,7 +56,7 @@ done
 
 
 if [ "$(id -u)" -ne 0 ]; then
-    fail "需要 root 权限：sudo bash bootstrap.sh"
+    fail "需要 root 权限。请先 sudo -i 切到 root，或在本条命令最前面加 sudo，然后重跑。"
     exit 1
 fi
 if ! command -v apt-get >/dev/null 2>&1; then
@@ -106,6 +110,7 @@ if [ "${#missing[@]}" -eq 0 ]; then
     ok "基础依赖已齐全"
 elif $CHECK_ONLY; then
     warn "缺少软件包: ${missing[*]}"
+    info "以上仅为检查（--check-only，未安装任何东西）。去掉该参数即安装；加 --dry-run 可先预览。"
     exit 2
 elif $DRY_RUN; then
     info "[dry-run] 将安装: ${missing[*]}"

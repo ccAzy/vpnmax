@@ -14,7 +14,11 @@
 #   4. 全程写部署清单 /var/log/vpnmax-optimize-manifest.log（来源/版本/校验值）。
 #   5. 支持 --dry-run 预览 + --no-reboot。
 #
-# 用法: bash deploy_optimize.sh [--no-reboot] [--dry-run] [VERSION_PIN=x.y.z]
+# 用法:
+  bash deploy_optimize.sh [选项]        # 仓库模式 / 已下载
+  bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_optimize.sh) [选项]   # 一键
+
+参数: bash deploy_optimize.sh [--no-reboot] [--dry-run] [VERSION_PIN=x.y.z]
 # 强制重跑: rm -f /etc/.vpnmax-optimized && bash deploy_optimize.sh
 # ===================================================================
 set -euo pipefail
@@ -28,7 +32,7 @@ SCRIPT_DIR="$VPNMAX_SCRIPT_DIR"
     VPNMAX_LIB_HOME="${VPNMAX_LIB_HOME:-/usr/local/lib/vpnmax}"
     mkdir -p "$VPNMAX_LIB_HOME" || true
     curl -fsSL "${VPNMAX_RAW:-https://raw.githubusercontent.com/ccAzy/vpnmax/main}/lib/boot.sh" -o "$VPNMAX_LIB_HOME/boot.sh" || {
-        printf '[✗] vpnmax: 无法获取引导脚本（检查网络，或改用 git clone 后运行）\n' >&2
+        printf '[x] vpnmax: 无法获取引导脚本（检查网络，或改用 git clone 后运行）\n' >&2
         exit 1
     }
     . "$VPNMAX_LIB_HOME/boot.sh"
@@ -104,7 +108,7 @@ check_env() {
         fail_flag=1
     fi
     if [ "$(id -u)" -ne 0 ]; then
-        fail "需要 root 权限运行"
+        fail "需要 root 权限。请先 sudo -i 切到 root，或在本条命令最前面加 sudo，然后重跑。"
         fail_flag=1
     fi
     local mem_kb mem_mb

@@ -40,30 +40,54 @@ vpnmax_lib_src() {
     return 1
 }
 
+# 取一个远端文件；失败返回 1。超时刻意取小：这是首次运行的前置步骤，
+# 一旦不可达宁可 5 秒内明确报错，也不要让用户对着空白终端等一分钟。
+vpnmax_fetch() { # <远端相对路径> <落到本地路径> <max-time>
+    local url="$VPNMAX_RAW/$1" out="$2" tmp
+    tmp="$out.$$"
+    if curl -fsSL --connect-timeout 5 --max-time "${3:-30}" "$url" -o "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+        mv -f "$tmp" "$out" && return 0
+    fi
+    rm -f "$tmp" 2>/dev/null || true
+    return 1
+}
+
 # 自举：把 lib/（与 vendor/）落到 $VPNMAX_LIB_HOME（幂等；任一文件失败即整体失败，不留半套）
 vpnmax_bootstrap() {
-    local m v tmp
+    local m v total=0 i=0
+    for m in $VPNMAX_MODULES_ALL $VPNMAX_MODULES_VERIFY $VPNMAX_VENDOR_FILES; do
+        case "$m" in sb.sh) [ -s "$VPNMAX_LIB_HOME/vendor/$m" ] || total=$((total + 1)) ;; esac
+    done
+    for m in $VPNMAX_MODULES_ALL $VPNMAX_MODULES_VERIFY; do
+        [ -s "$VPNMAX_LIB_HOME/$m.sh" ] || total=$((total + 1))
+    done
+    printf '[*] 首次运行：正在取回 lib/ 与 vendor/（共 %d 个文件）...
+' "$total" >&2
     mkdir -p "$VPNMAX_LIB_HOME/verify" "$VPNMAX_LIB_HOME/vendor" 2>/dev/null || return 1
     for m in $VPNMAX_MODULES_ALL $VPNMAX_MODULES_VERIFY; do
         [ -s "$VPNMAX_LIB_HOME/$m.sh" ] && continue
-        tmp="$VPNMAX_LIB_HOME/.$(basename "$m").$$"
-        if curl -fsSL --connect-timeout 10 --max-time 60 "$VPNMAX_RAW/lib/$m.sh" -o "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
-            mv -f "$tmp" "$VPNMAX_LIB_HOME/$m.sh" || return 1
-        else
-            rm -f "$tmp" 2>/dev/null || true
+        i=$((i + 1))
+        printf '    [%d/%d] lib/%s.sh
+' "$i" "$total" "$m" >&2
+        vpnmax_fetch "lib/$m.sh" "$VPNMAX_LIB_HOME/$m.sh" 30 || {
+            printf '[x] 取回 lib/%s.sh 失败（网络不可达）
+' "$m" >&2
             return 1
-        fi
+        }
     done
     for v in $VPNMAX_VENDOR_FILES; do
         [ -s "$VPNMAX_LIB_HOME/vendor/$v" ] && continue
-        tmp="$VPNMAX_LIB_HOME/vendor/.$v.$$"
-        if curl -fsSL --connect-timeout 15 --max-time 120 "$VPNMAX_RAW/vendor/$v" -o "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
-            mv -f "$tmp" "$VPNMAX_LIB_HOME/vendor/$v" || return 1
-        else
-            rm -f "$tmp" 2>/dev/null || true
+        i=$((i + 1))
+        printf '    [%d/%d] vendor/%s
+' "$i" "$total" "$v" >&2
+        vpnmax_fetch "vendor/$v" "$VPNMAX_LIB_HOME/vendor/$v" 120 || {
+            printf '[x] 取回 vendor/%s 失败（网络不可达）
+' "$v" >&2
             return 1
-        fi
+        }
     done
+    printf '    [%d/%d] 已就绪
+' "$total" "$total" >&2
     return 0
 }
 

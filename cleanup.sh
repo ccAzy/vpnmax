@@ -26,7 +26,7 @@ SCRIPT_DIR="$VPNMAX_SCRIPT_DIR"
     VPNMAX_LIB_HOME="${VPNMAX_LIB_HOME:-/usr/local/lib/vpnmax}"
     mkdir -p "$VPNMAX_LIB_HOME" || true
     curl -fsSL "${VPNMAX_RAW:-https://raw.githubusercontent.com/ccAzy/vpnmax/main}/lib/boot.sh" -o "$VPNMAX_LIB_HOME/boot.sh" || {
-        printf '[✗] vpnmax: 无法获取引导脚本（检查网络，或改用 git clone 后运行）\n' >&2
+        printf '[x] vpnmax: 无法获取引导脚本（检查网络，或改用 git clone 后运行）\n' >&2
         exit 1
     }
     . "$VPNMAX_LIB_HOME/boot.sh"
@@ -42,6 +42,22 @@ for arg in "$@"; do
     case "$arg" in
     --force) FORCE="--force" ;;
     --dry-run) DRY_RUN=true ;;
+    --help | -h)
+        cat <<'HELP'
+vpnmax cleanup.sh — 彻底清理本项目的 sing-box / cloudflared / 防火墙链 / cron
+用法:
+  bash cleanup.sh [--force] [--dry-run]                 # 仓库/已下载
+  bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/cleanup.sh) [选项]
+  --force    跳过交互确认（仅限非交互场景，危险）
+  --dry-run  只打印将执行的动作，不实际删除
+清理前自动备份 iptables/nftables 规则到 /var/backups/vpnmax/
+HELP
+        exit 0
+        ;;
+    *)
+        warn "未知参数: $arg（可用 --help 查看）"
+        exit 2
+        ;;
     esac
 done
 
