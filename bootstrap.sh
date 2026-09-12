@@ -9,15 +9,25 @@
 # ===================================================================
 set -euo pipefail
 
-# lib 加载（保持单文件可独立运行）
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-for _lib in common; do
-    if [ -f "$SCRIPT_DIR/lib/${_lib}.sh" ]; then
-        source "$SCRIPT_DIR/lib/${_lib}.sh" 2>/dev/null || true
-    elif [ -f "lib/${_lib}.sh" ]; then
-        source "lib/${_lib}.sh" 2>/dev/null || true
-    fi
-done
+# shellcheck disable=SC2034 # 本文件只放"配置常量 + 编排"，常量由 lib/*.sh 在运行时消费（跨文件）
+
+# ── lib 加载：唯一源码在仓库 lib/；curl|bash 单文件模式自动自举取回，不再有内联副本 ──
+VPNMAX_SCRIPT_DIR="${VPNMAX_SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)}"
+# shellcheck disable=SC2034 # lib/*.sh 经 SCRIPT_DIR 定位仓库内 vendor/
+SCRIPT_DIR="$VPNMAX_SCRIPT_DIR"
+. "$VPNMAX_SCRIPT_DIR/lib/boot.sh" 2>/dev/null || . "${VPNMAX_LIB_HOME:-/usr/local/lib/vpnmax}/boot.sh" 2>/dev/null || {
+    VPNMAX_LIB_HOME="${VPNMAX_LIB_HOME:-/usr/local/lib/vpnmax}"
+    mkdir -p "$VPNMAX_LIB_HOME" || true
+    curl -fsSL "${VPNMAX_RAW:-https://raw.githubusercontent.com/ccAzy/vpnmax/main}/lib/boot.sh" -o "$VPNMAX_LIB_HOME/boot.sh" || {
+        printf '[✗] vpnmax: 无法获取引导脚本（检查网络，或改用 git clone 后运行）\n' >&2
+        exit 1
+    }
+    . "$VPNMAX_LIB_HOME/boot.sh"
+}
+vpnmax_load "$VPNMAX_MODULES_ALL" || {
+    printf '[✗] vpnmax: 无法加载 lib（网络或仓库不可达）\n' >&2
+    exit 1
+}
 
 DRY_RUN=false
 CHECK_ONLY=false
@@ -40,15 +50,6 @@ HELP
     esac
 done
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-N='\033[0m'
-info() { echo -e "${CYAN}[*]${N}   $*"; }
-ok() { echo -e "${GREEN}[✓]${N}   $*"; }
-warn() { echo -e "${YELLOW}[!]${N}   $*"; }
-fail() { echo -e "${RED}[✗]${N}   $*"; }
 
 if [ "$(id -u)" -ne 0 ]; then
     fail "需要 root 权限：sudo bash bootstrap.sh"
@@ -135,14 +136,6 @@ fi
 
 # ── IPv4 优先（防 raw.githubusercontent 等 v6 黑洞导致 curl 卡 75s）──
 # 幂等去重：移除所有旧 precedence ::ffff:0:0/96 行，仅保留一行
-ensure_gai_ipv4() {
-    if grep -q '^precedence ::ffff:0:0/96 100' /etc/gai.conf 2>/dev/null && [ "$(grep -c '^precedence ::ffff:0:0/96 100' /etc/gai.conf 2>/dev/null)" -eq 1 ]; then
-        return 0
-    fi
-    grep -v '^precedence ::ffff:0:0/96' /etc/gai.conf >/tmp/gai.clean 2>/dev/null || true
-    cat /tmp/gai.clean >/etc/gai.conf 2>/dev/null || true
-    echo 'precedence ::ffff:0:0/96 100' >>/etc/gai.conf 2>/dev/null
-}
 if $CHECK_ONLY; then
     grep -q '^precedence ::ffff:0:0/96 100' /etc/gai.conf 2>/dev/null && ok "gai.conf 已设 IPv4 优先" || warn "gai.conf 未设 IPv4 优先（建议：precedence ::ffff:0:0/96 100）"
 elif $DRY_RUN; then

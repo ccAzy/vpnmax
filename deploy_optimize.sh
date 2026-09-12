@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2034 # 本文件只放"配置常量 + 编排"，常量由 lib/*.sh 在运行时消费（跨文件）
 # SPDX-License-Identifier: GPL-3.0-only
 # ===================================================================
 # vpnmax — 服务器暴力优化脚本（BBRv3 + 网络极限压榨）
@@ -18,17 +19,24 @@
 # ===================================================================
 set -euo pipefail
 
-# ── lib 加载（保持单文件可独立运行：lib 存在则 source，否则用内联兜底） ──
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-for _lib in common time optimize; do
-    if [ -f "$SCRIPT_DIR/lib/${_lib}.sh" ]; then
-        source "$SCRIPT_DIR/lib/${_lib}.sh"
-    elif [ -f "lib/${_lib}.sh" ]; then
-        source "lib/${_lib}.sh"
-    elif [ -f "/usr/local/lib/vpnmax/${_lib}.sh" ]; then
-        source "/usr/local/lib/vpnmax/${_lib}.sh"
-    fi
-done
+
+# ── lib 加载：唯一源码在仓库 lib/；curl|bash 单文件模式自动自举取回，不再有内联副本 ──
+VPNMAX_SCRIPT_DIR="${VPNMAX_SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)}"
+# shellcheck disable=SC2034 # lib/*.sh 经 SCRIPT_DIR 定位仓库内 vendor/
+SCRIPT_DIR="$VPNMAX_SCRIPT_DIR"
+. "$VPNMAX_SCRIPT_DIR/lib/boot.sh" 2>/dev/null || . "${VPNMAX_LIB_HOME:-/usr/local/lib/vpnmax}/boot.sh" 2>/dev/null || {
+    VPNMAX_LIB_HOME="${VPNMAX_LIB_HOME:-/usr/local/lib/vpnmax}"
+    mkdir -p "$VPNMAX_LIB_HOME" || true
+    curl -fsSL "${VPNMAX_RAW:-https://raw.githubusercontent.com/ccAzy/vpnmax/main}/lib/boot.sh" -o "$VPNMAX_LIB_HOME/boot.sh" || {
+        printf '[✗] vpnmax: 无法获取引导脚本（检查网络，或改用 git clone 后运行）\n' >&2
+        exit 1
+    }
+    . "$VPNMAX_LIB_HOME/boot.sh"
+}
+vpnmax_load "$VPNMAX_MODULES_ALL" || {
+    printf '[✗] vpnmax: 无法加载 lib（网络或仓库不可达）\n' >&2
+    exit 1
+}
 
 # ── 参数解析 ──
 NO_REBOOT=false
@@ -66,11 +74,6 @@ if [ -w /var/log ] && [ -d /var/log ]; then
 fi
 
 # 写部署清单（来源/版本/校验值，供审计）
-# 仓库模式下以 lib/common.sh 为准；单文件模式（无 lib）才用下面这个兜底。
-# 注：此前是无条件定义，会把 lib 的版本顶掉 → 改 lib/common.sh 不生效。
-if ! declare -F manifest >/dev/null 2>&1; then
-    manifest() { echo "[$(date -Is)] $*" >>"$MANIFEST" 2>/dev/null || true; }
-fi
 
 cleanup() { rm -f /tmp/bbrv3.deb /tmp/bbrv3.sha256 2>/dev/null || true; }
 trap cleanup EXIT
@@ -78,17 +81,6 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 UA="User-Agent: vpnmax-deploy"
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-WHITE='\033[1;37m'
-N='\033[0m'
-
-info() { echo -e "${CYAN}[*]${N}   $*"; }
-ok() { echo -e "${GREEN}[✓]${N}   $*"; }
-warn() { echo -e "${YELLOW}[!]${N}   $*"; }
-fail() { echo -e "${RED}[✗]${N}   $*"; }
 
 if [ -n "$VERSION_PIN" ] && [[ ! "$VERSION_PIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     fail "VERSION_PIN 格式无效：$VERSION_PIN（应为 x.y.z，例如 7.3.2）"
@@ -96,13 +88,6 @@ if [ -n "$VERSION_PIN" ] && [[ ! "$VERSION_PIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; 
 fi
 
 # dry-run 包装：--dry-run 时不执行副作用命令
-run() {
-    if $DRY_RUN; then
-        info "[dry-run] $*"
-        return 0
-    fi
-    "$@"
-}
 
 step() {
     echo ""
@@ -215,39 +200,6 @@ install_dependencies() {
     ok "基础依赖安装完成"
 }
 
-if ! declare -F ensure_time_sync >/dev/null 2>&1; then
-    ensure_time_sync() {
-        info "校准系统时间（chrony 国内源）..."
-        if ${DRY_RUN:-false}; then
-            info "[dry-run] 将配置 chrony 并同步时间"
-            return 0
-        fi
-        cat >/etc/chrony/chrony.conf <<'CHRONY'
-pool ntp.aliyun.com iburst
-pool ntp1.aliyun.com iburst
-pool cn.pool.ntp.org iburst
-pool pool.ntp.org iburst
-makestep 1 3
-rtcsync
-CHRONY
-        systemctl enable --now chrony 2>/dev/null || systemctl restart chrony 2>/dev/null || true
-        timeout 15 chronyc makestep 2>/dev/null || timeout 15 ntpdate -u ntp.aliyun.com 2>/dev/null || true
-        sleep 2
-        if chronyc tracking 2>/dev/null | grep -q 'Leap status.*Normal'; then
-            ok "时间已同步（chrony Normal）"
-        else
-            chronyc tracking 2>&1 | head -5 || true
-            warn "chrony 尚未 Normal，稍后将自动追上（已设 makestep 1 3）"
-        fi
-        if timedatectl 2>/dev/null | grep -q 'System clock synchronized: yes'; then
-            ok "System clock synchronized: yes"
-        else
-            info "timedatectl: $(timedatectl 2>/dev/null | grep -E 'synchronized|NTP' | tr '\n' ';')"
-        fi
-        manifest "time sync ensured via chrony"
-    }
-fi
-
 # 先预检再访问 apt，避免非 Debian 系统在检查前就执行 apt-get。
 check_env
 if $DRY_RUN; then
@@ -258,12 +210,6 @@ fi
 install_dependencies || exit 1
 ensure_time_sync
 # ── IPv4 优先（防 raw.githubusercontent 等 v6 黑洞导致 curl 卡 75s）── 幂等去重单行
-ensure_gai_ipv4() {
-    if grep -q '^precedence ::ffff:0:0/96 100' /etc/gai.conf 2>/dev/null && [ "$(grep -c '^precedence ::ffff:0:0/96 100' /etc/gai.conf 2>/dev/null)" -eq 1 ]; then return 0; fi
-    grep -v '^precedence ::ffff:0:0/96' /etc/gai.conf >/tmp/gai.clean 2>/dev/null || true
-    cat /tmp/gai.clean >/etc/gai.conf 2>/dev/null || true
-    echo 'precedence ::ffff:0:0/96 100' >>/etc/gai.conf 2>/dev/null
-}
 if grep -q '^precedence ::ffff:0:0/96 100' /etc/gai.conf 2>/dev/null && [ "$(grep -c '^precedence ::ffff:0:0/96 100' /etc/gai.conf 2>/dev/null)" -eq 1 ]; then
     ok "gai.conf 已设 IPv4 优先"
 else
@@ -289,385 +235,8 @@ PUBLIC_IP=$(curl -fsSL --max-time 5 https://api.ipify.org 2>/dev/null) ||
 # 关键安全点：SHA256 校验【强制】。下载地址优先：
 #   1) 若 VERSION_PIN 指定 → 精确拼接该 tag 的下载 URL（无 API 不确定性）
 #   2) 否则 → API 取最新 max tag，并同样强制 SHA256 校验
-if ! declare -F install_bbrv3 >/dev/null 2>&1; then
-    install_bbrv3() {
-        # vpnmax融合：内核产物自供（本仓 kernel/ 定时构建发 release）。
-        # BBR_RELEASE_REPO 默认 ccAzy/vpnmax；在 vpnmax 首个构建落地前桥接回退老仓（过渡期，用 warn 标明）。
-        local _repo_primary="${BBR_RELEASE_REPO:-ccAzy/vpnmax}" _repo_fallback="ccAzy/Actions-bbr-v3"
-        bbr_api_get() { # $1=API 路径；按 主仓→桥接仓 顺序取首个有效响应
-            local _p="$1" _r _out
-            for _r in "$_repo_primary" "$_repo_fallback"; do
-                _out=$(curl -fsL -H "$UA" --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 20 "https://api.github.com/repos/$_r/$_p" 2>/dev/null || true)
-                if [ -n "$_out" ] && ! echo "$_out" | grep -q '"message"'; then
-                    [ "$_r" != "$_repo_primary" ] && warn "vpnmax 暂无对应产物，桥接使用 $_r（过渡期）"
-                    printf '%s' "$_out"
-                    return 0
-                fi
-            done
-            return 1
-        }
-        if echo "$CUR_KERNEL" | grep -q "bbrv3"; then
-            local cur_ver latest_tag latest_ver
-            cur_ver=$(echo "$CUR_KERNEL" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' || true)
-            latest_tag=$(bbr_api_get "releases?per_page=10" 2>/dev/null |
-                jq -r '.[].tag_name // empty' | grep -F 'max' | head -1 || true)
-            latest_ver=$(echo "$latest_tag" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
-            if [ -z "$latest_ver" ]; then
-                ok "已是 BBRv3: $CUR_KERNEL（无法确认最新版本，跳过）"
-                return 0
-            elif [ "$cur_ver" = "$latest_ver" ]; then
-                ok "已是最新 BBRv3: $CUR_KERNEL"
-                return 0
-            else
-                warn "当前 $CUR_KERNEL，最新 ${latest_ver}，开始升级..."
-            fi
-        fi
-
-        info "获取 BBRv3 内核..."
-        local TAG="" DOWNLOAD_URL="" api_json
-
-        if [ -n "$VERSION_PIN" ]; then
-            # 显式锁定版本：TAG = ${ARCH}-${VERSION}-max
-            local arch_tag="$DEB_ARCH"
-            [ "$DEB_ARCH" = "amd64" ] && arch_tag="x86_64"
-            TAG="${arch_tag}-${VERSION_PIN}-max"
-            info "锁定版本: $TAG"
-            api_json=$(bbr_api_get "releases/tags/${TAG}" 2>/dev/null || true)
-            DOWNLOAD_URL=$(echo "$api_json" | jq -r '.assets[]?.browser_download_url // empty' |
-                grep -F "linux-image-" | grep -F "joeyblog-bbrv3" | grep -F "$DEB_ARCH.deb" | head -1 || true)
-        else
-            # 默认：取最新 -max release
-            api_json=$(bbr_api_get "releases?per_page=10" 2>/dev/null || true)
-            DOWNLOAD_URL=$(echo "$api_json" | jq -r '.[].assets[]?.browser_download_url // empty' |
-                grep -F "linux-image-" | grep -F "joeyblog-bbrv3-max" | grep -F "$DEB_ARCH.deb" | head -1 || true)
-        fi
-
-        [ -z "$DOWNLOAD_URL" ] && {
-            fail "无法获取任何可用的 BBRv3 下载地址（API 与 kernel.org 均失败）"
-            return 1
-        }
-
-        info "下载 BBRv3... ($(basename "$DOWNLOAD_URL"))"
-        if ! run curl -fL# -H "$UA" --retry 3 --retry-delay 2 --retry-connrefused --connect-timeout 15 --max-time 120 -o /tmp/bbrv3.deb "$DOWNLOAD_URL" || [ ! -s /tmp/bbrv3.deb ]; then
-            fail "BBRv3 下载失败"
-            return 1
-        fi
-
-        # ── 强制 SHA256 校验（与旧版最大差异：失败即中止，不降级） ──
-        local pkg_name sha_url expected actual
-        pkg_name=$(basename "$DOWNLOAD_URL")
-        sha_url="$(dirname "$DOWNLOAD_URL")/SHA256SUMS"
-        info "强制 SHA256 校验: $(basename "$sha_url")"
-        if ! run curl -fsSL -H "$UA" --retry 2 --retry-delay 2 --max-time 20 -o /tmp/bbrv3.sha256 "$sha_url" || [ ! -s /tmp/bbrv3.sha256 ]; then
-            fail "SHA256SUMS 无法获取 —— 为安全起见中止安装（内核为最高权限组件，不接受无校验安装）"
-            return 1
-        fi
-        expected=$(awk -v f="$pkg_name" '$2 == f || $2 == "*" f {print $1; exit}' /tmp/bbrv3.sha256 2>/dev/null || true)
-        if [ -z "$expected" ]; then
-            fail "SHA256SUMS 中未找到 $pkg_name —— 中止安装（版本不匹配风险）"
-            return 1
-        fi
-        actual=$(sha256sum /tmp/bbrv3.deb 2>/dev/null | awk '{print $1}' || true)
-        if [ "$expected" != "$actual" ]; then
-            fail "SHA256 校验失败（下载可能损坏或被篡改）—— 中止安装"
-            return 1
-        fi
-        ok "SHA256 校验通过 ($actual)"
-        manifest "BBRv3 $pkg_name sha256=$actual url=$DOWNLOAD_URL"
-
-        if ! run dpkg -i /tmp/bbrv3.deb; then
-            run apt-get install -f -y -qq || true
-            run dpkg -i /tmp/bbrv3.deb || {
-                fail "BBRv3 安装失败"
-                return 1
-            }
-        fi
-
-        # 验证新内核文件已就位（防 dpkg 成功但未解包，重启后无法开机）
-        local kernel_file
-        kernel_file=$(find /boot -maxdepth 1 -type f -name 'vmlinuz-*bbrv3*' -print -quit 2>/dev/null || true)
-        if [ -n "$kernel_file" ]; then
-            ok "新内核文件已就位: $kernel_file"
-        else
-            fail "未检测到 bbrv3 内核文件，安装可能未生效，中止重启"
-            return 1
-        fi
-
-        # grub 菜单可见（部分 VPS 默认 timeout=0）
-        if grep -q '^GRUB_TIMEOUT=0' /etc/default/grub 2>/dev/null; then
-            run sed -i 's/^GRUB_TIMEOUT=0/GRUB_TIMEOUT=10/g' /etc/default/grub
-            run update-grub || warn "update-grub 失败，GRUB 菜单可能未更新"
-        fi
-        rm -f /tmp/bbrv3.deb
-        ok "BBRv3 已安装（重启后生效）"
-    }
-fi
 # ── 网络优化（保持 ACVPN 的三级内存分级 + ethtool 尽力降级） ──
-if ! declare -F clean_stale_acvpn_sysctl >/dev/null 2>&1; then
-    # G3回退副本（与 lib/optimize.sh 同逻辑）：部署路径清旧 ACVPN 残留
-    clean_stale_acvpn_sysctl() {
-        local f bakdir
-        bakdir="/var/backups/vpnmax/stale-acvpn-$(date +%Y%m%d)"
-        for f in /etc/sysctl.d/99-acvpn.conf /etc/sysctl.d/99-ACVPN-security.conf /etc/sysctl.d/99-ACVPN-brutal.conf; do
-            if [ -f "$f" ]; then
-                run mkdir -p "$bakdir"
-                run cp -a "$f" "$bakdir/" || true
-                run rm -f "$f"
-                ok "已清除旧 ACVPN 残留: $f（备份于 $bakdir）"
-            fi
-        done
-    }
-fi
-if ! declare -F apply_sysctl >/dev/null 2>&1; then
-    apply_sysctl() {
-        # G3修复：部署路径顺手清除旧 ACVPN 时代残留 sysctl（线上 cc/vn/qq2 实测残留）。
-        # vpnmax 的 security 文件是其超集，删旧不丢配置；先备份到 /var/backups/vpnmax/。
-        clean_stale_acvpn_sysctl
-
-        info "应用网络暴力优化..."
-        local mem_kb mem_mb RMEM TCPMEM CONNTRACK_MAX CONNTRACK_HASH
-        mem_kb=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0)
-        mem_mb=$((mem_kb / 1024))
-        if [ "$mem_mb" -ge 8192 ]; then
-            RMEM="134217728"
-            TCPMEM="65536 262144 1048576" # ≥8GB，页数=256MB/1GB/4GB
-        elif [ "$mem_mb" -ge 2048 ]; then
-            RMEM="67108864"
-            TCPMEM="32768 65536 131072" # 2-8GB，页数=128MB/256MB/512MB
-        else
-            RMEM="16777216"
-            TCPMEM="16384 32768 65536" # <2GB，页数=64MB/128MB/256MB
-        fi
-
-        if [ "$mem_mb" -ge 8192 ]; then
-            CONNTRACK_MAX=1000000
-            CONNTRACK_HASH=262144
-        elif [ "$mem_mb" -ge 2048 ]; then
-            CONNTRACK_MAX=500000
-            CONNTRACK_HASH=131072
-        else
-            CONNTRACK_MAX=130000
-            CONNTRACK_HASH=32768
-        fi
-
-        if command -v modprobe >/dev/null 2>&1; then
-            if ! run modprobe tcp_bbr; then
-                warn "tcp_bbr 模块加载失败，BBR 可能不可用"
-            fi
-            run modprobe nf_conntrack || true
-        fi
-        if [ -w /sys/module/nf_conntrack/parameters/hashsize ]; then
-            if ! run bash -c "printf '%s\\n' '$CONNTRACK_HASH' > /sys/module/nf_conntrack/parameters/hashsize"; then
-                warn "nf_conntrack hashsize 写入失败，连接跟踪仍使用内核默认桶数"
-            fi
-        fi
-
-        local conf="/etc/sysctl.d/99-vpnmax-brutal.conf"
-        run bash -c "cat > '$conf' <<'SYS'
-# vpnmax 网络优化（按内存分级，防 OOM；tcp_mem 单位为内存页）
-net.core.default_qdisc = fq
-net.ipv4.tcp_congestion_control = bbr
-net.core.rmem_max = $RMEM
-net.core.wmem_max = $RMEM
-net.ipv4.tcp_rmem = 4096 87380 $RMEM
-net.ipv4.tcp_wmem = 4096 65536 $RMEM
-net.ipv4.tcp_mem = $TCPMEM
-net.ipv4.tcp_moderate_rcvbuf = 1
-net.ipv4.tcp_no_metrics_save = 1
-net.ipv4.tcp_limit_output_bytes = 262144
-net.core.netdev_max_backlog = 262144
-net.core.somaxconn = 65535
-net.ipv4.tcp_max_syn_backlog = 8192
-net.ipv4.tcp_slow_start_after_idle = 0
-net.ipv4.tcp_fastopen = 3
-net.ipv4.tcp_notsent_lowat = 16384
-net.ipv4.tcp_keepalive_time = 120
-net.ipv4.tcp_keepalive_intvl = 30
-net.ipv4.tcp_keepalive_probes = 3
-net.ipv4.ip_local_port_range = 1024 65535
-net.netfilter.nf_conntrack_max = $CONNTRACK_MAX
-net.ipv4.tcp_app_win = 0
-net.ipv4.tcp_early_retrans = 3
-net.ipv4.tcp_thin_linear_timeouts = 1
-net.ipv4.tcp_retrans_collapse = 0
-net.ipv4.tcp_rfc1337 = 1
-net.ipv4.tcp_dsack = 1
-net.ipv4.tcp_comp_sack_nr = 3
-net.core.optmem_max = 204800
-net.ipv4.udp_rmem_min = 8192
-net.ipv4.udp_wmem_min = 8192
-net.core.busy_read = 50
-net.core.busy_poll = 50
-SYS"
-    if ! run sysctl --system; then
-        warn "sysctl --system 执行失败，部分网络参数可能未生效"
-    fi
-    manifest "conntrack max=$CONNTRACK_MAX hash=$CONNTRACK_HASH"
-    ok "网络参数已写入 $conf 并应用（conntrack=$CONNTRACK_MAX，按内存分级防 OOM）"
-}
-fi
-if ! declare -F apply_ethtool >/dev/null 2>&1; then
-    apply_ethtool() {
-        command -v ethtool >/dev/null 2>&1 || {
-            info "ethtool 未安装，跳过网卡深度优化"
-            return 0
-        }
-        local iface
-        iface=$(ip route 2>/dev/null | awk '/default/ {print $5; exit}' || true)
-        if [ -z "$iface" ] || [ ! -d "/sys/class/net/$iface" ]; then
-            warn "无法识别默认网卡，跳过 ethtool"
-            return 1
-        fi
-        run ethtool -G "$iface" rx 4096 tx 4096 || true
-        run ethtool -K "$iface" tx-checksumming on rx-checksumming on || true
-        run ethtool -K "$iface" tso on gso on gro on || true
-        run ethtool -K "$iface" tx-udp-segmentation on || true
-        run ethtool -C "$iface" adaptive-rx off adaptive-tx off || true
-        run ethtool -C "$iface" rx-usecs 16 tx-usecs 16 || true
-        ok "ethtool 深度优化完成（不支持的项已自动跳过）"
-    }
-fi
-if ! declare -F apply_qdisc >/dev/null 2>&1; then
-    apply_qdisc() {
-        local iface
-        iface=$(ip route 2>/dev/null | awk '/default/ {print $5; exit}' || true)
-        if [ -z "$iface" ]; then
-            warn "无法识别默认网卡，跳过 fq 队列调度"
-            return 1
-        fi
-        if ! run tc qdisc replace dev "$iface" root fq; then
-            warn "fq 队列调度应用失败，BBR 仍会运行但节奏控制可能不理想"
-            return 1
-        fi
-        ok "fq 队列调度已应用到 $iface"
-    }
-fi
-if ! declare -F boost_limits >/dev/null 2>&1; then
-    boost_limits() {
-        run bash -c "cat > /etc/security/limits.d/99-vpnmax.conf <<'LIMITS'
-* soft nofile 1048576
-* hard nofile 1048576
-* soft nproc 655360
-* hard nproc 655360
-root soft nofile 1048576
-root hard nofile 1048576
-root soft nproc 655360
-root hard nproc 655360
-LIMITS"
-        ok "资源限制已提升"
-    }
-fi
-if ! declare -F apply_rss >/dev/null 2>&1; then
-    apply_rss() {
-        # 多队列网络调优：所有 RX/TX 队列的 RPS/XPS + ethtool + fq 持久化。
-        run bash -c "cat > /usr/local/sbin/vpnmax-net-tuning.sh <<'TUNE'
-#!/bin/bash
-set -u
-
-iface=\$(ip route 2>/dev/null | awk '/default/ {print \$5; exit}')
-[ -n \"\$iface\" ] || { echo '[vpnmax-net-tuning] no default interface' >&2; exit 1; }
-[ -d \"/sys/class/net/\$iface\" ] || { echo \"[vpnmax-net-tuning] interface not found: \$iface\" >&2; exit 1; }
-
-cores=\$(nproc 2>/dev/null || echo 1)
-if [ \"\$cores\" -ge 64 ]; then
-    cpu_mask=ffffffffffffffff
-else
-    cpu_mask=\$(printf '%x' \$(( (1 << cores) - 1 )))
-fi
-rps_flow=\$((cores * 32768))
-
-command -v ethtool >/dev/null 2>&1 && {
-    ethtool -G \"\$iface\" rx 4096 tx 4096 2>/dev/null || true
-    ethtool -K \"\$iface\" tx-checksumming on rx-checksumming on 2>/dev/null || true
-    ethtool -K \"\$iface\" tso on gso on gro on 2>/dev/null || true
-    ethtool -K \"\$iface\" tx-udp-segmentation on 2>/dev/null || true
-    ethtool -C \"\$iface\" adaptive-rx off adaptive-tx off 2>/dev/null || true
-    ethtool -C \"\$iface\" rx-usecs 16 tx-usecs 16 2>/dev/null || true
-}
-
-rx_count=0
-for queue in /sys/class/net/\$iface/queues/rx-*; do
-    [ -d \"\$queue\" ] || continue
-    printf '%s\\n' \"\$cpu_mask\" > \"\$queue/rps_cpus\" 2>/dev/null || true
-    printf '%s\\n' \"\$rps_flow\" > \"\$queue/rps_flow_cnt\" 2>/dev/null || true
-    rx_count=\$((rx_count + 1))
-done
-for queue in /sys/class/net/\$iface/queues/tx-*; do
-    [ -d \"\$queue\" ] || continue
-    printf '%s\\n' \"\$cpu_mask\" > \"\$queue/xps_cpus\" 2>/dev/null || true
-done
-
-tc qdisc replace dev \"\$iface\" root fq 2>/dev/null || true
-if [ \"\$rx_count\" -gt 0 ]; then
-    sysctl -w net.core.rps_sock_flow_entries=\$((rx_count * rps_flow)) >/dev/null 2>&1 || true
-fi
-echo \"[vpnmax-net-tuning] applied iface=\$iface cores=\$cores rx_queues=\$rx_count mask=\$cpu_mask\"
-TUNE
-chmod +x /usr/local/sbin/vpnmax-net-tuning.sh
-cat > /etc/systemd/system/vpnmax-net-tuning.service <<'UNIT'
-[Unit]
-Description=vpnmax persistent network tuning
-After=network-online.target
-Wants=network-online.target
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/local/sbin/vpnmax-net-tuning.sh
-[Install]
-WantedBy=multi-user.target
-UNIT"
-        run systemctl daemon-reload || true
-        if ! run systemctl enable --now vpnmax-net-tuning.service; then
-            warn "网络调优 systemd 服务启用失败，重启后可能不会自动恢复网卡参数"
-        fi
-        ok "多队列 RPS/XPS、ethtool、fq 已配置并持久化 (vpnmax-net-tuning.service)"
-    }
-fi
 # ── GRUB 默认内核校验（防重启后进旧内核） ──
-if ! declare -F ensure_grub_boot >/dev/null 2>&1; then
-    ensure_grub_boot() {
-        [ -f /boot/grub/grub.cfg ] || {
-            warn "未找到 /boot/grub/grub.cfg，跳过默认内核校验"
-            return 1
-        }
-        local entries=() target=-1 idx=0 e gd
-        mapfile -t entries < <(grep -oP "menuentry '\K[^']+" /boot/grub/grub.cfg 2>/dev/null || true)
-        [ "${#entries[@]}" -eq 0 ] && {
-            warn "无法解析 grub.cfg 菜单项，跳过"
-            return 1
-        }
-        for e in "${entries[@]}"; do
-            if [[ "$e" == *bbrv3* ]]; then
-                target=$idx
-                break
-            fi
-            idx=$((idx + 1))
-        done
-        [ "$target" -lt 0 ] && {
-            warn "grub.cfg 中未找到 BBRv3 菜单项"
-            return 1
-        }
-        if [ "$target" -eq 0 ]; then
-            ok "GRUB 默认引导项已是 BBRv3"
-            return 0
-        fi
-
-        gd=$(grep -oP '^GRUB_DEFAULT=\K.*' /etc/default/grub 2>/dev/null | head -1 || true)
-        if [ "$gd" = "saved" ]; then
-            if run grub-set-default "$target"; then
-                ok "GRUB_DEFAULT=saved 已设为 BBRv3 (index $target)"
-            else
-                warn "grub-set-default 失败"
-            fi
-        elif [ -z "$gd" ] || [ "$gd" = "0" ]; then
-            run sed -i "s/^GRUB_DEFAULT=.*/GRUB_DEFAULT=$target/" /etc/default/grub
-            run update-grub || warn "update-grub 失败，GRUB 默认项可能未保存"
-            ok "GRUB_DEFAULT 已设为 $target (BBRv3)"
-        else
-            info "GRUB_DEFAULT=$gd，BBRv3 位于 index $target；若重启未进新内核请手动改"
-        fi
-    }
-fi
 # ══════════ 主流程 ══════════
 if $DRY_RUN; then echo -e "${YELLOW}═══ DRY-RUN 模式：仅预览，不修改系统 ═══${N}"; fi
 logo() { :; }

@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # lib/common.sh — 统一日志/运行/清单，供所有部署脚本 source
 # 保持幂等：重复 source 不重复定义
+[ -n "${VPNMAX_COMMON_LOADED:-}" ] && return 0
+VPNMAX_COMMON_LOADED=1
 
 # 颜色与日志（若已定义则不覆盖）
 RED=${RED:-'\033[0;31m'}
@@ -11,26 +13,58 @@ CYAN=${CYAN:-'\033[0;36m'}
 WHITE=${WHITE:-'\033[1;37m'}
 N=${N:-'\033[0m'}
 
-# 统一日志函数（若外层已定义则保留外层）
-if ! declare -F info >/dev/null 2>&1; then info() { echo -e "${CYAN}[*]${N}   $*"; }; fi
-if ! declare -F ok >/dev/null 2>&1; then ok() { echo -e "${GREEN}[✓]${N}   $*"; }; fi
-if ! declare -F warn >/dev/null 2>&1; then warn() { echo -e "${YELLOW}[!]${N}   $*"; }; fi
-if ! declare -F fail >/dev/null 2>&1; then fail() { echo -e "${RED}[✗]${N}   $*"; }; fi
+# 统一日志函数（唯一来源；入口脚本不再各抄一份，故不加 declare -F 守卫——
+# 守卫会让残留的旧副本悄悄胜出，制造「改 lib 不生效」）
+info() { echo -e "${CYAN}[*]${N}   $*"; }
+ok() { echo -e "${GREEN}[✓]${N}   $*"; }
+warn() { echo -e "${YELLOW}[!]${N}   $*"; }
+fail() { echo -e "${RED}[✗]${N}   $*"; }
+
+# 脏数据/清理场景需要「报错并终止」的变体
+die() {
+    echo -e "${RED}[✗]${N}   $*"
+    exit 1
+}
 
 # 部署清单（若外层已定义 MANIFEST 则复用）
 MANIFEST=${MANIFEST:-"/var/log/vpnmax-manifest.log"}
 manifest() { echo "[$(date -Is)] $*" >>"$MANIFEST" 2>/dev/null || true; }
 
-# DRY_RUN 感知的执行包装
-if ! declare -F run >/dev/null 2>&1; then
-    run() {
-        if ${DRY_RUN:-false}; then
-            info "[dry-run] $*"
-            return 0
-        fi
-        "$@" 2>/dev/null || true
-    }
-fi
+# DRY_RUN 感知的执行包装——两种语义，按调用方需要选，别混用：
+#   run    — 失败即失败（set -e 下中止），保留 stderr，可观测。用于「必须成功」的部署动作。
+#   run_ok — 吞掉失败与 stderr。用于「尽力而为」的清理/探测动作。
+# 历史遗留：入口脚本各自定义 run（deploy_* 传播、cleanup 吞错），而 `if ! declare -F run`
+# 守卫让顶层那份胜出 → 改 lib 静默失效。已收敛到本文件，故不再加守卫。
+run() {
+    if ${DRY_RUN:-false}; then
+        info "[dry-run] $*"
+        return 0
+    fi
+    "$@"
+}
+
+run_ok() {
+    if ${DRY_RUN:-false}; then
+        info "[dry-run] $*"
+        return 0
+    fi
+    "$@" 2>/dev/null || true
+}
+
+# IPv4 优先（gai.conf）幂等单行。bootstrap 与 deploy_optimize 共用，故收在 common。
+# 用 mktemp 而非固定 /tmp 名：脚本以 root 运行，固定名可被本地用户预置符号链接利用。
+ensure_gai_ipv4() {
+    local _tmp
+    if grep -q '^precedence ::ffff:0:0/96 100' /etc/gai.conf 2>/dev/null &&
+        [ "$(grep -c '^precedence ::ffff:0:0/96 100' /etc/gai.conf 2>/dev/null)" -eq 1 ]; then
+        return 0
+    fi
+    _tmp=$(mktemp) || return 0
+    grep -v '^precedence ::ffff:0:0/96' /etc/gai.conf >"$_tmp" 2>/dev/null || true
+    cat "$_tmp" >/etc/gai.conf 2>/dev/null || true
+    rm -f "$_tmp" 2>/dev/null || true
+    echo 'precedence ::ffff:0:0/96 100' >>/etc/gai.conf 2>/dev/null
+}
 
 # 基础依赖（两阶段共用，含 chrony 时间同步）
 # shellcheck disable=SC2034 # used by callers after source

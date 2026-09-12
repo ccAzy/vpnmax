@@ -1,5 +1,52 @@
 # Changelog
 
+## 2026-09-12 — 消除「双实现」：lib/ 成为唯一源码，单文件改为运行时自举
+
+**背景（为什么不是继续修漂移）**：上一轮修完 11 处漂移后，检查器仍报 10 处同名不同实现未决，
+且 `run` 是语义级冲突（顶层 `"$@"` 传播错误 vs lib `"$@" 2>/dev/null || true` 吞错误+stderr）。
+根因不是「对齐不勤」，而是**架构把一份代码拆成了两份**：入口脚本为了让 `curl | bash` 能跑，
+各自抄一份内联兜底（共 38 块、约 1200 行），于是每加一个能力都要写两遍。继续逐个修 = 无限长尾。
+
+**做法（最短路径）**：不再「让两份保持一致」，而是**让源码只有一份**。
+
+* 新增 `lib/boot.sh` 引导层：定位 lib 来源（`$SCRIPT_DIR/lib` → `./lib` → `/usr/local/lib/vpnmax`），
+  全无则自举下载到 `/usr/local/lib/vpnmax/`，**连同 `vendor/`**。入口脚本只留 3 行加载。
+* **删除全部 38 个内联兜底块**（deploy_singbox 26 / deploy_optimize 10 / cleanup 2）：
+  deploy_singbox 1562→~300 行，deploy_optimize 746→319 行。
+* `apply_hardening` 归位到新 `lib/hardening.sh`；`ensure_gai_ipv4` 从两个脚本的重复定义收进
+  `lib/common.sh`（顺手把固定 `/tmp/gai.clean` 改为 `mktemp`，消掉一个固定名的符号链接面）。
+* `run` 语义拆分：`run` = 传播失败（部署动作，保留 stderr 可观测）；`run_ok` = 吞失败（清理/探测）。
+  cleanup.sh 的 34 处调用改用 `run_ok`，行为不变但语义不再含糊。
+* 常量单一来源：`HOP_*` / `RATE_*` / `CONN_ABOVE` / `SSH_RATE_*` / `CHAIN_*` / `BAK_DIR` 收进
+  `lib/firewall.sh`，`SB_PATCH_MARKER` 收进 `lib/singbox.sh`。**此前顶层重复定义这些 `readonly`
+  常量，会在 lib 先加载后运行时报 `readonly variable` 并退出** —— 这是 `bash -n` 查不出的运行时缺陷。
+* 删 `build.sh`（"校验 lib→单文件漂移"的前提已不存在）。
+* `tools/check-fallback-sync.py` → `tools/check-lib-integrity.py`：门禁改为防回归
+  （R1 禁内联兜底 / R2 必须走 boot 引导 / R3 禁重复定义 lib 的 readonly 常量 / R4 全量 `bash -n` / R5 lib 模块守卫）。
+* `vendor/README.md` 第六节的"待决策"结案：自举把 vendor 落到 `/usr/local/lib/vpnmax/vendor/`，
+  而 `fetch_sb_sh()` 的查找链本就含该绝对路径 → **"vendor 优先"在单文件部署下真正生效**。
+
+**验证**
+
+| 项 | 结果 |
+| --- | --- |
+| `bash -n` | 23/23 通过 |
+| shellcheck（忽略已知良性 SC1090/1091/2015） | 0 告警 |
+| `tools/check-lib-integrity.py` | R1–R5 全绿 |
+| 剩余内联兜底块 | **0** |
+| WSL 实机：仓库模式加载 lib | 23 个关键函数全部定义；`run` 吞 stderr 0 次，`run_ok` 1 次 |
+| WSL 实机：单文件自举（无 lib 目录，HTTP 取回） | 退出码 0；自动落 11 个 lib + 2 个 verify 子模块 + vendor/sb.sh |
+| 入口脚本 `--help` | bootstrap / deploy_optimize / deploy_singbox / cleanup 全部 rc=0 |
+
+**过程中的教训**
+
+* 批量删块时，**行首 `fi` 不是可靠边界**：heredoc（`<<'KEEP'`，内容 0 缩进，内含 `fi`）与
+  跨行双引号字符串（`run bash -c "cat >x <<'TUNE' ... TUNE"`，其内容不是 bash 语法）都会骗过正则。
+  中途两版删除器分别删出了「51 行」（删过头）和「main() 头被吃掉」。最终改用 **ast-grep 的 AST
+  节点 range** 定位边界，一次成功。
+* 静态检查必须配**运行时冒烟**：`readonly` 常量重复定义、`run` 语义、自举路径，`bash -n` 全都查不出来，
+  是 WSL 里 `--help` 跑一遍才暴露的。
+
 ## 2026-09-12 — lib/ 与内联兜底的一致性修复（+ 漂移检测工具）
 
 **背景**：顶层脚本同时支持两种跑法 —— 仓库模式 `source lib/*.sh`；单文件模式（`curl ... | bash`）

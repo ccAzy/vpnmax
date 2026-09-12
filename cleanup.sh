@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2034 # 本文件只放"配置常量 + 编排"，常量由 lib/*.sh 在运行时消费（跨文件）
 # SPDX-License-Identifier: GPL-3.0-only
 # ===================================================================
 # vpnmax — sing-box 彻底清理脚本
@@ -17,15 +18,23 @@
 # ===================================================================
 set -euo pipefail
 
-# lib 加载（保持单文件可独立运行）
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-for _lib in common firewall; do
-    if [ -f "$SCRIPT_DIR/lib/${_lib}.sh" ]; then
-        source "$SCRIPT_DIR/lib/${_lib}.sh" 2>/dev/null || true
-    elif [ -f "lib/${_lib}.sh" ]; then
-        source "lib/${_lib}.sh" 2>/dev/null || true
-    fi
-done
+# ── lib 加载：唯一源码在仓库 lib/；curl|bash 单文件模式自动自举取回，不再有内联副本 ──
+VPNMAX_SCRIPT_DIR="${VPNMAX_SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)}"
+# shellcheck disable=SC2034 # lib/*.sh 经 SCRIPT_DIR 定位仓库内 vendor/
+SCRIPT_DIR="$VPNMAX_SCRIPT_DIR"
+. "$VPNMAX_SCRIPT_DIR/lib/boot.sh" 2>/dev/null || . "${VPNMAX_LIB_HOME:-/usr/local/lib/vpnmax}/boot.sh" 2>/dev/null || {
+    VPNMAX_LIB_HOME="${VPNMAX_LIB_HOME:-/usr/local/lib/vpnmax}"
+    mkdir -p "$VPNMAX_LIB_HOME" || true
+    curl -fsSL "${VPNMAX_RAW:-https://raw.githubusercontent.com/ccAzy/vpnmax/main}/lib/boot.sh" -o "$VPNMAX_LIB_HOME/boot.sh" || {
+        printf '[✗] vpnmax: 无法获取引导脚本（检查网络，或改用 git clone 后运行）\n' >&2
+        exit 1
+    }
+    . "$VPNMAX_LIB_HOME/boot.sh"
+}
+vpnmax_load "$VPNMAX_MODULES_ALL" || {
+    printf '[✗] vpnmax: 无法加载 lib（网络或仓库不可达）\n' >&2
+    exit 1
+}
 
 FORCE=""
 DRY_RUN=false
@@ -36,32 +45,7 @@ for arg in "$@"; do
     esac
 done
 
-BAK_DIR="/var/backups/vpnmax"
-CHAIN_ANTIPROBE="VPNMAX_ANTIPROBE" # filter INPUT 子链
-CHAIN_PORTHOP="VPNMAX_PORTHOP"     # nat PREROUTING 子链
-CHAIN_RSS="VPNMAX_RSS"             # filter INPUT 子链（RSS 若曾加过）
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-N='\033[0m'
-ok() { echo -e "${GREEN}[✓]${N}   $*"; }
-warn() { echo -e "${YELLOW}[!]${N}   $*"; }
-die() {
-    echo -e "${RED}[✗]${N}   $*"
-    exit 1
-}
-info() { echo -e "${CYAN}[*]${N}   $*"; }
-
 # dry-run 安全的执行包装：--dry-run 只打印将执行的动作，不真正执行
-run() {
-    if $DRY_RUN; then
-        info "[dry-run] $*"
-        return 0
-    fi
-    "$@" 2>/dev/null || true
-}
 
 echo ""
 echo "========================================="
@@ -79,67 +63,9 @@ if [ "$FORCE" != "--force" ]; then
 fi
 
 # ———————— 0. 备份当前防火墙规则（清理前快照，可回滚） ————————
-if ! declare -F bak_firewall >/dev/null 2>&1; then
-    bak_firewall() {
-        echo "--- 备份防火墙规则 ---"
-        run mkdir -p "$BAK_DIR"
-        local stamp
-        stamp=$(date +%Y%m%d-%H%M%S)
-        if command -v iptables-save >/dev/null 2>&1; then
-            run bash -c "iptables-save > '$BAK_DIR/iptables.$stamp' 2>/dev/null"
-            run bash -c "ip6tables-save > '$BAK_DIR/ip6tables.$stamp' 2>/dev/null || true"
-            ok "iptables 规则已备份到 $BAK_DIR (iptables.$stamp)"
-        fi
-        if command -v nft >/dev/null 2>&1; then
-            run bash -c "nft list ruleset > '$BAK_DIR/nftables.$stamp' 2>/dev/null || true"
-        fi
-    }
-fi
 
 # ———————— 仅删除 vpnmax 自己的独立链（不碰第三方规则） ————————
 # 关键改进：不 grep INPUT 链全局匹配删除，只处理 VPNMAX_* 命名链。
-if ! declare -F clean_chains >/dev/null 2>&1; then
-    clean_chains() {
-        echo "--- 清理 vpnmax 独立防火墙链 ---"
-        # 1) 先从主链移除 vpnmax 的跳转规则（精确匹配 jump 到命名链，绝不误伤其他规则）
-        run iptables -D INPUT -j "$CHAIN_ANTIPROBE" 2>/dev/null
-        run iptables -D INPUT -j "$CHAIN_RSS" 2>/dev/null
-        run iptables -t nat -D PREROUTING -j "$CHAIN_PORTHOP" 2>/dev/null
-        # IPv6 对称
-        if command -v ip6tables >/dev/null 2>&1; then
-            run ip6tables -D INPUT -j "$CHAIN_ANTIPROBE" 2>/dev/null
-            run ip6tables -t nat -D PREROUTING -j "$CHAIN_PORTHOP" 2>/dev/null
-        fi
-
-        # 2) flush 并删除命名链
-        run iptables -F "$CHAIN_ANTIPROBE" 2>/dev/null
-        run iptables -X "$CHAIN_ANTIPROBE" 2>/dev/null
-        run iptables -F "$CHAIN_RSS" 2>/dev/null
-        run iptables -X "$CHAIN_RSS" 2>/dev/null
-        run iptables -t nat -F "$CHAIN_PORTHOP" 2>/dev/null
-        run iptables -t nat -X "$CHAIN_PORTHOP" 2>/dev/null
-        if command -v ip6tables >/dev/null 2>&1; then
-            run ip6tables -F "$CHAIN_ANTIPROBE" 2>/dev/null
-            run ip6tables -X "$CHAIN_ANTIPROBE" 2>/dev/null
-            run ip6tables -t nat -F "$CHAIN_PORTHOP" 2>/dev/null
-            run ip6tables -t nat -X "$CHAIN_PORTHOP" 2>/dev/null
-        fi
-
-        # 3) 兜底：若旧版遗留了分散的 nat 端口跳跃规则（40000:42000/43000:45000）也精确按目标端口清理，
-        #    但仅匹配 vpnmax/ACVPN 特有的端口范围 DNAT/REDIRECT，依旧不动其他规则。
-        #    （2026-08-24 HK 实测：sing-box 旧配置还会留下 REDIRECT 40000:41000 型重复规则，同样会截胡跳跃段流量）
-        #    注意：grep 无匹配 rc=1，在 set -e + pipefail 下会直接杀掉脚本（2026-08-27 HK 实测 dry-run 中断于此），
-        #    整段用 || true 兜底：无匹配=无需清理，属正常路径而非错误
-        command -v iptables >/dev/null 2>&1 && {
-            iptables -t nat -L PREROUTING --line-numbers -n 2>/dev/null |
-                grep -E '(DNAT|REDIRECT).*dpts:(40000:42000|43000:45000|40000:41000|43000:44000) ' |
-                awk '{print $1}' | sort -rn | while read -r num; do
-                run iptables -t nat -D PREROUTING "$num"
-            done
-        } || true
-        ok "独立防火墙链已清理（未触碰第三方规则）"
-    }
-fi
 
 # ———————— 1-5：停止服务 / 杀进程 / 清 crontab / 删 unit / 删目录 ————————
 # （与 ACVPN 相同，但 crontab 处理修复了 set -e 退出问题）
@@ -147,29 +73,29 @@ stop_services() {
     echo "--- 停止服务 ---"
     for svc in sing-box cloudflared cloudflared-update vpnmax-rss vpnmax-net-tuning; do
         if systemctl is-active "$svc" &>/dev/null; then
-            run systemctl stop "$svc" || true
+            run_ok systemctl stop "$svc" || true
             ok "已停止服务: $svc"
         fi
         if systemctl is-enabled "$svc" &>/dev/null; then
-            run systemctl disable "$svc" || true
+            run_ok systemctl disable "$svc" || true
             ok "已禁用服务: $svc"
         fi
     done
     if systemctl is-active cloudflared-update.timer &>/dev/null; then
-        run systemctl stop cloudflared-update.timer || true
-        run systemctl disable cloudflared-update.timer || true
+        run_ok systemctl stop cloudflared-update.timer || true
+        run_ok systemctl disable cloudflared-update.timer || true
         ok "已停止/禁用: cloudflared-update.timer"
     fi
 }
 
 kill_procs() {
     echo "--- 终止进程 ---"
-    run pkill -15 -f sing-box || true
+    run_ok pkill -15 -f sing-box || true
     sleep 2
     # 临时 Argo 隧道统一匹配口径（与 deploy_singbox keepalive 一致：cloudflared + tunnel + --url）
     for proc in sing-box 'cloudflared.*tunnel.*--url'; do
         if pgrep -f "$proc" &>/dev/null; then
-            run pkill -9 -f "$proc" || true
+            run_ok pkill -9 -f "$proc" || true
             ok "已终止: $proc"
         fi
     done
@@ -184,7 +110,7 @@ kill_sub_httpd() {
     pids=$(ss -tlnp 2>/dev/null | grep ":$port " | grep -oE 'pid=[0-9]+' | sed 's/pid=//' | sort -u || true)
     for p in $pids; do
         if tr '\0' ' ' <"/proc/$p/cmdline" 2>/dev/null | grep -qE 'busybox[[:space:]]+httpd.*(/root/websbox|subport.log)'; then
-            run kill -TERM "$p" || true
+            run_ok kill -TERM "$p" || true
             ok "已终止 vpnmax 订阅 httpd (PID $p, 端口 $port)"
         fi
     done
@@ -233,14 +159,14 @@ rm_units() {
         if [ -e "$unit" ]; then
             # 只删除明确属于 vpnmax/旧 ACVPN 的 unit；不因同名而删除其他 cloudflared 服务。
             if [ "$(basename "$unit")" = "vpnmax-rss.service" ] || [ "$(basename "$unit")" = "vpnplus-rss.service" ] || [ "$(basename "$unit")" = "sb.service" ] || [ "$(basename "$unit")" = "xr.service" ] || [ -d "$unit" ] || grep -qE '/etc/s-box|/root/websbox|vpnmax|ACVPN|ENABLE_DEPRECATED' "$unit" 2>/dev/null; then
-                run rm -rf "$unit"
+                run_ok rm -rf "$unit"
                 COUNT=$((COUNT + 1))
             else
                 warn "保留未确认归属的 unit: $unit"
             fi
         fi
     done
-    run systemctl daemon-reload || true
+    run_ok systemctl daemon-reload || true
     [ $COUNT -gt 0 ] && ok "已删除 ${COUNT} 个 vpnmax/sb systemd unit 文件" || info "无 vpnmax unit 文件需清理"
 }
 
@@ -266,7 +192,7 @@ rm_files() {
         /var/log/vpnmax-sbfeed.log \
         /var/log/vpnplus-sbfeed.log; do
         if [ -e "$path" ]; then
-            run rm -rf "$path"
+            run_ok rm -rf "$path"
             COUNT=$((COUNT + 1))
             ok "已删除: $path"
         fi
@@ -274,7 +200,7 @@ rm_files() {
     for mark in /etc/.ACVPN-optimized /etc/.ACVPN-singbox /etc/.vpnmax-optimized /etc/.vpnmax-singbox; do
         # 注意：[ -f ] && {...} 独立成句时，文件不存在=整句 rc=1，set -e 会杀脚本（2026-08-27 HK 实测），必须 || true
         if [ -f "$mark" ]; then
-            run rm -f "$mark"
+            run_ok rm -f "$mark"
             ok "已删除标记: $mark"
         fi
     done
@@ -291,7 +217,7 @@ clean_sysctl() {
         /etc/sysctl.d/99-vpnmax-bbr.conf; do
         # 同上：if 形式防 set -e 在文件不存在时杀脚本
         if [ -f "$f" ]; then
-            run rm -f "$f"
+            run_ok rm -f "$f"
             ok "已删除 sysctl 文件: $f"
         fi
     done
@@ -304,8 +230,8 @@ clean_nft() {
         # 只有检测到 vpnmax/旧 ACVPN 的部署痕迹时才删除通用 sing-box 表，
         # 避免清理另一套独立 sing-box 实例。
         if [ -f /etc/.vpnmax-singbox ] || [ -f /etc/.ACVPN-singbox ] || [ -d /etc/s-box ]; then
-            run nft delete table inet sing-box 2>/dev/null
-            run nft delete table inet vpnmax 2>/dev/null
+            run_ok nft delete table inet sing-box 2>/dev/null
+            run_ok nft delete table inet vpnmax 2>/dev/null
         else
             info "未确认 nftables sing-box 表归属，保留不动"
         fi

@@ -15,6 +15,7 @@ readonly SSH_RATE_BURST=5 # SSH 爆破防御 3/min、burst
 CHAIN_PORTHOP="VPNMAX_PORTHOP"
 CHAIN_ANTIPROBE="VPNMAX_ANTIPROBE"
 CHAIN_RSS="VPNMAX_RSS"
+BAK_DIR="${BAK_DIR:-/var/backups/vpnmax}" # 规则备份目录（cleanup 用）
 # 旧链名（vpnplus时代）：迁移期识别与清理用，新部署不再创建
 LEGACY_CHAINS="ACVPN_PORTHOP ACVPN_ANTIPROBE ACVPN_RSS"
 

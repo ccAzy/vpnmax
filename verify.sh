@@ -10,32 +10,29 @@
 # ===================================================================
 set -euo pipefail
 
-# lib 加载（verify 侧仅需 time/tuic 检查，失败则用内联兜底）
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-for _lib in common time verify/time verify/tuic; do
-    if [ -f "$SCRIPT_DIR/lib/${_lib}.sh" ]; then
-        source "$SCRIPT_DIR/lib/${_lib}.sh" 2>/dev/null || true
-    elif [ -f "lib/${_lib}.sh" ]; then
-        source "lib/${_lib}.sh" 2>/dev/null || true
-    fi
-done
+# ── lib 加载：唯一源码在仓库 lib/；curl|bash 单文件模式自动自举取回，不再有内联副本 ──
+VPNMAX_SCRIPT_DIR="${VPNMAX_SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)}"
+# shellcheck disable=SC2034 # lib/*.sh 经 SCRIPT_DIR 定位仓库内 vendor/
+SCRIPT_DIR="$VPNMAX_SCRIPT_DIR"
+. "$VPNMAX_SCRIPT_DIR/lib/boot.sh" 2>/dev/null || . "${VPNMAX_LIB_HOME:-/usr/local/lib/vpnmax}/boot.sh" 2>/dev/null || {
+    VPNMAX_LIB_HOME="${VPNMAX_LIB_HOME:-/usr/local/lib/vpnmax}"
+    mkdir -p "$VPNMAX_LIB_HOME" || true
+    curl -fsSL "${VPNMAX_RAW:-https://raw.githubusercontent.com/ccAzy/vpnmax/main}/lib/boot.sh" -o "$VPNMAX_LIB_HOME/boot.sh" || {
+        printf '[✗] vpnmax: 无法获取引导脚本（检查网络，或改用 git clone 后运行）\n' >&2
+        exit 1
+    }
+    . "$VPNMAX_LIB_HOME/boot.sh"
+}
+vpnmax_load "$VPNMAX_MODULES_ALL $VPNMAX_MODULES_VERIFY" || {
+    printf '[✗] vpnmax: 无法加载 lib（网络或仓库不可达）\n' >&2
+    exit 1
+}
 
 SERVER_IP="${SERVER_IP:-${1:-}}" # 兼容两种用法：SERVER_IP=x.x.x.x bash verify.sh 或 bash verify.sh x.x.x.x
 VMESS_LOCK="${VMESS_LOCK:-off}"
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-N='\033[0m'
-ok() { echo -e "${GREEN}[✓]${N}   $*"; }
-warn() { echo -e "${YELLOW}[!]${N}   $*"; }
-fail() { echo -e "${RED}[✗]${N}   $*"; }
-info() { echo -e "${CYAN}[*]${N}   $*"; }
 
 PASS=0
 FAIL=0
-CHAIN_PORTHOP="VPNMAX_PORTHOP"
-CHAIN_ANTIPROBE="VPNMAX_ANTIPROBE"
 check() {
     local desc="$1"
     shift

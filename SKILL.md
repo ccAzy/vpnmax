@@ -17,6 +17,8 @@ description: >
 | `deploy_singbox.sh` | **第2步** — sing-box 部署（独立防火墙链 + 订阅 + Argo + WARP） |
 | `cleanup.sh` | 独立清理脚本（只删 vpnmax 自己的防火墙链，自动备份） |
 | `verify.sh` | 部署后验证（进程/端口/BBR/fq/网卡/独立链/Argo/订阅/域名分流/调优缺口回归） |
+| `lib/boot.sh` | **引导层** — 定位 lib 来源，缺失则自举取回（全项目唯一引导代码） |
+| `lib/hardening.sh` | 安全 sysctl（网络感知 RA）+ systemd LimitNOFILE |
 | `lib/edgeprefer.sh` | CF 边缘优选（扫段→测延迟→colo/家族选择，写 argo-extra.conf） |
 | `vendor/sb.sh` | 自带 sing-box-yg（与 pin SHA 一致，零上游安装） |
 

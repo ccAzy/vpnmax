@@ -59,15 +59,14 @@
 | `geoip.db` / `geosite.db`（MetaCubeX/meta-rules-dat，`latest`） | 这是**数据文件**不是可执行代码，且必须跟随上游持续更新（新增域名/线路）。冻结它会让分流规则过期。风险等级远低于可执行脚本 |
 | 版本横幅读取（`yonggekkk/sing-box-yg/main/version`） | 仅用于显示文字，不参与任何执行 |
 
-## 六、尚未解决：`vendor/` 相对路径在单文件部署下解析不到
+## 六、`vendor/` 路径解析（2026-09-12 已解决）
 
-`sb.sh` 里的"优先用本地件"分支按 `dirname "$(readlink -f "${BASH_SOURCE[0]}")"/vendor/...` 找文件。
-而一键部署是把 `sb.sh` **当单文件下载执行**，运行时 `vendor/` 不在脚本旁边 → 这些分支恒为假。
+`lib/boot.sh` 自举时会把 `vendor/` 一并落到 `/usr/local/lib/vpnmax/vendor/`，
+而 `fetch_sb_sh()` 的查找链本就把该绝对路径列在最后一个候选：
 
-**这不影响安全性**（现在的回退路径是 pin + 校验，不是裸拉 main），但意味着
-"把文件放进 `vendor/` 就能生效"是不成立的。要让本地件真正生效，需部署侧配合，二选一：
+```
+${SCRIPT_DIR}/vendor → ./vendor → $(dirname $BASH_SOURCE)/../vendor → /usr/local/lib/vpnmax/vendor
+```
 
-- 把 `vendor/` 随部署一起落到固定绝对路径（如 `/usr/local/lib/vpnmax/vendor/`），代码改读绝对路径；
-- 或改为"克隆整个仓库再运行"。
-
-这一项待决策，本文档不假装它已解决。
+所以"优先用本地件"在单文件部署下**已真正生效**；只有文件缺失时才回退到自家 raw
+（`SB_URL`，指向本仓 `vendor/sb.sh`，非上游），两条路都必须过 SHA256 校验。

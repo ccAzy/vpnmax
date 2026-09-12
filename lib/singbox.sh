@@ -3,6 +3,9 @@
 [ -n "${VPNMAX_SINGBOX_LOADED:-}" ] && return 0
 VPNMAX_SINGBOX_LOADED=1
 
+# Argo 补丁标记（apply_argo_patch 写入，重跑时据此判定 sb.sh 是否已打过补丁）
+readonly SB_PATCH_MARKER="/etc/s-box/.sb-argo-patched.sha256"
+
 sb_feed() { # sb_feed <超时秒数> - <<'KEYS'  ... KB: 用 stdin 传入按键
     local secs="${1:-120}"
     shift

@@ -233,24 +233,32 @@ RESET_SUB=1 bash deploy_singbox.sh
 
 旧链接立即 `404`，新订阅 `clmi.yaml/tuic5.txt` 已切到新 `token/端口`，TUIC 当前为 `54321`（`40254` 已知易被限速，`verify.sh` 会黄灯提醒）
 
-## 项目结构（lib 化，低成本变更）
+## 项目结构（lib 唯一源码；单文件运行时自举）
 
-源码以 `lib/` 为准，单文件保持 `curl | bash` 兼容：
+`lib/` 是**唯一源码**：入口脚本只做「引导 + 编排」，不再各自抄一份内联实现。
+`curl | bash` 单文件模式由 `lib/boot.sh` 在运行时把 `lib/`（与 `vendor/`）取回到
+`/usr/local/lib/vpnmax/` 再加载 —— 单文件与仓库模式跑的是同一份代码。
 
 ```
-lib/common.sh      # 日志/颜色/BASE_PACKAGES+chrony
-lib/time.sh        # ensure_time_sync / check_time_sync
+lib/boot.sh        # 引导层：定位 lib 来源，缺失则自举取回（全项目唯一的引导代码）
+lib/common.sh      # 日志/颜色/run 与 run_ok/BASE_PACKAGES+chrony/gai.conf
+lib/time.sh        # ensure_time_sync
+lib/hardening.sh   # 安全 sysctl（网络感知 RA）+ systemd LimitNOFILE
 lib/optimize.sh    # BBRv3 + sysctl/ethtool/qdisc（按内存分级）+ 智能带宽/亚太调优
 lib/firewall.sh    # VPNMAX_* 链 + 跳跃 DNAT + 清理
 lib/singbox.sh     # sb_feed / sb 安装
 lib/subscription.sh# KEEP_PORT + RESET_SUB
 lib/argo.sh        # Argo + keepalive v3
 lib/warp.sh        # WARP + 分流
+lib/edgeprefer.sh  # CF 边缘优选
 lib/verify/        # verify 侧 time/tuic 回环 204
-build.sh           # 校验 lib→单文件漂移，生成 dist/ 供 raw 分发
 ```
 
-改 1 个端口/1 个协议只动 1 个 `lib/*.sh`，`bash build.sh` 校验漂移，`bash -n + shellcheck` 门禁。
+两档执行包装，语义分开、不要混用：`run` 失败即失败（部署动作，保留 stderr 可观测），
+`run_ok` 吞失败与 stderr（清理/探测）。
+
+改 1 个端口/1 个协议只动 1 个 `lib/*.sh`。门禁：`python tools/check-lib-integrity.py`
+—— 禁止内联兜底回归、禁止重复定义 lib 的 `readonly` 常量、全量 `bash -n`。
 
 ---
 
