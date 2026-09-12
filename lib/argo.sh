@@ -108,7 +108,7 @@ install_argo_keepalive() {
     if $DRY_RUN; then
         info "[dry-run] 写入 /usr/local/sbin/vpnmax-argo-keepalive.sh（flock互斥+僵死重连+翻动告警）"
     else
-        cat >/usr/local/sbin/vpnmax-argo-keepalive.sh <<'KEEP'
+        atomic_write /usr/local/sbin/vpnmax-argo-keepalive.sh <<'KEEP'
 #!/bin/bash
 # vpnmax Argo 临时隧道保活 v3（cron 每 3 分钟）
 # v3 改进（相对 v2）:

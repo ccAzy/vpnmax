@@ -61,10 +61,10 @@ persist_firewall() {
     fi
     # 无论上述哪种成功，都额外保留一份明文快照 + 自建恢复 unit，双保险
     mkdir -p /etc/iptables 2>/dev/null || true
-    iptables-save >/etc/iptables/rules.v4 2>/dev/null || true
-    ip6tables-save >/etc/iptables/rules.v6 2>/dev/null || true
+    command -v iptables-save >/dev/null 2>&1 && iptables-save 2>/dev/null | atomic_write /etc/iptables/rules.v4 || true
+    command -v ip6tables-save >/dev/null 2>&1 && ip6tables-save 2>/dev/null | atomic_write /etc/iptables/rules.v6 || true
     if [ -s /etc/iptables/rules.v4 ]; then
-        cat >/etc/systemd/system/vpnmax-netfilter-restore.service <<'UNIT'
+        atomic_write /etc/systemd/system/vpnmax-netfilter-restore.service <<'UNIT'
 [Unit]
 Description=vpnmax iptables restore (before network)
 DefaultDependencies=no

@@ -239,14 +239,15 @@ force_ipv4_lock() {
     bad+=$(jq -r '.outbounds[]? | select((.type=="direct" or .type=="socks") and .domain_strategy != "prefer_ipv4") | .domain_strategy // "null"' /etc/s-box/sb.json 2>&1 | head -1 || true)
     if [ -n "$bad" ]; then
         info "出口非 prefer_ipv4 ($bad)，尝试对齐..."
-        cp /etc/s-box/sb.json /etc/s-box/sb.json.bak.ipv4 2>/dev/null || true
-        if jq '(.route.rules[]? | select(.strategy != null) | .strategy) = "prefer_ipv4" | (.dns.strategy? | select(. != null)) = "prefer_ipv4" | (.dns.servers[]? | select(.strategy != null) | .strategy) = "prefer_ipv4" | (.outbounds[]? | select(.type=="direct" or .type=="socks") | .domain_strategy) = "prefer_ipv4"' /etc/s-box/sb.json >/tmp/sb.json.tmp 2>/dev/null && [ -s /tmp/sb.json.tmp ] && ! cmp -s /etc/s-box/sb.json /tmp/sb.json.tmp 2>/dev/null; then
-            cat /tmp/sb.json.tmp >/etc/s-box/sb.json && rm -f /tmp/sb.json.tmp
+        local _sj
+        _sj="$(mktemp /etc/s-box/.sb.json.XXXXXX 2>/dev/null || true)"
+        if [ -n "$_sj" ] && jq '(.route.rules[]? | select(.strategy != null) | .strategy) = "prefer_ipv4" | (.dns.strategy? | select(. != null)) = "prefer_ipv4" | (.dns.servers[]? | select(.strategy != null) | .strategy) = "prefer_ipv4" | (.outbounds[]? | select(.type=="direct" or .type=="socks") | .domain_strategy) = "prefer_ipv4"' /etc/s-box/sb.json >"$_sj" 2>/dev/null && [ -s "$_sj" ] && ! cmp -s /etc/s-box/sb.json "$_sj" 2>/dev/null; then
+            atomic_place "$_sj" /etc/s-box/sb.json "bak.ipv4" || rm -f "$_sj" 2>/dev/null || true
             jq empty /etc/s-box/sb.json 2>/dev/null && systemctl try-restart sing-box 2>/dev/null || systemctl restart sing-box 2>/dev/null || true
             sleep 2
             ok "出口已切 prefer_ipv4"
         else
-            rm -f /tmp/sb.json.tmp 2>/dev/null || true
+            rm -f "${_sj:-/nonexistent}" 2>/dev/null || true
             warn "出口修复失败，保持原状"
         fi
     else ok "出口已是 prefer_ipv4"; fi
@@ -263,20 +264,19 @@ ensure_singbox_legacy_env() {
             return 0
         fi
         mkdir -p "$(dirname "$dropin")" 2>/dev/null || true
-        # 保留原有 LimitNOFILE，若不存在则新建
-        if [ -f "$dropin" ]; then
-            grep -q "LimitNOFILE" "$dropin" 2>/dev/null || echo "LimitNOFILE=1048576" >>"$dropin"
-        else
-            cat >"$dropin" <<'EOF'
-[Service]
-LimitNOFILE=1048576
-EOF
-        fi
-        if ! grep -q "ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS" "$dropin" 2>/dev/null; then
-            echo "Environment=ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS=true" >>"$dropin"
-            ok "已注入 sing-box 兼容环境变量 ($dropin)"
-            _dropin_changed=true
-        fi
+        # 一次性原子写：保留已有内容 → 补 [Service] 头 → 补 LimitNOFILE → 补 Environment
+        {
+            if [ -f "$dropin" ]; then
+                cat "$dropin" 2>/dev/null || true
+                grep -q '^\[' "$dropin" 2>/dev/null || echo "[Service]"
+            else
+                echo "[Service]"
+            fi
+            grep -q "LimitNOFILE" "$dropin" 2>/dev/null || echo "LimitNOFILE=1048576"
+            echo "Environment=ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS=true"
+        } | atomic_write "$dropin" "bak"
+        ok "已注入 sing-box 兼容环境变量 ($dropin)"
+        _dropin_changed=true
         # 兼容 sb/xr 服务也注入（若存在）
         for svc in sb xr; do
             if [ -f "/etc/systemd/system/${svc}.service" ]; then

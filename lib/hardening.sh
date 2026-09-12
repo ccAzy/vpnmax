@@ -15,7 +15,7 @@ apply_hardening() {
     else
         v6_ra_lines='# 检测到 IPv6 地址，保留 RA 以防破坏 v6 网络配置'
     fi
-    run bash -c "cat > '$conf' <<'SEC'
+    atomic_write "$conf" <<SEC
 # vpnmax 安全加固（网络感知生成）
 net.ipv4.conf.all.rp_filter = 1
 net.ipv4.conf.default.rp_filter = 1
@@ -33,7 +33,7 @@ net.ipv6.conf.all.accept_redirects = 0
 net.ipv6.conf.default.accept_redirects = 0
 net.ipv6.conf.all.accept_source_route = 0
 net.ipv6.conf.default.accept_source_route = 0
-SEC"
+SEC
     sysctl --system >/dev/null 2>&1 || true
     ok "安全 sysctl 已持久化 ($conf)"
 
@@ -41,10 +41,10 @@ SEC"
     for svc in sing-box sb xr; do
         if [ -f "/etc/systemd/system/${svc}.service" ]; then
             mkdir -p "/etc/systemd/system/${svc}.service.d" 2>/dev/null || continue
-            run bash -c "cat > '/etc/systemd/system/${svc}.service.d/99-vpnmax.conf' <<'LIMIT'
+            atomic_write "/etc/systemd/system/${svc}.service.d/99-vpnmax.conf" <<'LIMIT'
 [Service]
 LimitNOFILE=1048576
-LIMIT"
+LIMIT
             applied=true
         fi
     done

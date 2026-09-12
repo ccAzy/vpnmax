@@ -120,7 +120,7 @@ setup_logrotate() {
         info "[dry-run] 安装 /etc/logrotate.d/vpnmax（轮转 vpnmax 各类日志）"
         return 0
     fi
-    cat >/etc/logrotate.d/vpnmax <<'ROT'
+    atomic_write /etc/logrotate.d/vpnmax <<'ROT'
 /var/log/vpnmax-optimize.log
 /var/log/vpnmax-optimize-manifest.log
 /var/log/vpnmax-singbox-manifest.log

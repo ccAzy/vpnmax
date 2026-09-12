@@ -13,7 +13,7 @@ ensure_time_sync() {
         info "[dry-run] 将配置 chrony 并同步时间"
         return 0
     fi
-    cat >/etc/chrony/chrony.conf <<'CHRONY'
+    atomic_write /etc/chrony/chrony.conf <<'CHRONY'
 pool ntp.aliyun.com iburst
 pool ntp1.aliyun.com iburst
 pool cn.pool.ntp.org iburst

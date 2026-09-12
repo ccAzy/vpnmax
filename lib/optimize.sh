@@ -159,7 +159,7 @@ apply_sysctl() {
     fi
 
     local conf="/etc/sysctl.d/99-vpnmax-brutal.conf"
-    run bash -c "cat > '$conf' <<'SYS'
+    atomic_write "$conf" <<SYS
 # vpnmax 网络优化（按内存分级，防 OOM；tcp_mem 单位为内存页）
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
@@ -194,7 +194,7 @@ net.ipv4.udp_rmem_min = 8192
 net.ipv4.udp_wmem_min = 8192
 net.core.busy_read = 50
 net.core.busy_poll = 50
-SYS"
+SYS
     if ! run sysctl --system; then
         warn "sysctl --system 执行失败，部分网络参数可能未生效"
     fi
@@ -251,7 +251,7 @@ apply_qdisc() {
 }
 
 boost_limits() {
-    run bash -c "cat > /etc/security/limits.d/99-vpnmax.conf <<'LIMITS'
+    atomic_write /etc/security/limits.d/99-vpnmax.conf <<'LIMITS'
 * soft nofile 1048576
 * hard nofile 1048576
 * soft nproc 655360
@@ -260,57 +260,57 @@ root soft nofile 1048576
 root hard nofile 1048576
 root soft nproc 655360
 root hard nproc 655360
-LIMITS"
+LIMITS
     ok "资源限制已提升"
 }
 
 apply_rss() {
     # 多队列网络调优：所有 RX/TX 队列的 RPS/XPS + ethtool + fq 持久化。
-    run bash -c "cat > /usr/local/sbin/vpnmax-net-tuning.sh <<'TUNE'
+    atomic_write /usr/local/sbin/vpnmax-net-tuning.sh <<'TUNE'
 #!/bin/bash
 set -u
 
-iface=\$(ip route 2>/dev/null | awk '/default/ {print \$5; exit}')
-[ -n \"\$iface\" ] || { echo '[vpnmax-net-tuning] no default interface' >&2; exit 1; }
-[ -d \"/sys/class/net/\$iface\" ] || { echo \"[vpnmax-net-tuning] interface not found: \$iface\" >&2; exit 1; }
+iface=$(ip route 2>/dev/null | awk '/default/ {print $5; exit}')
+[ -n "$iface" ] || { echo '[vpnmax-net-tuning] no default interface' >&2; exit 1; }
+[ -d "/sys/class/net/$iface" ] || { echo "[vpnmax-net-tuning] interface not found: $iface" >&2; exit 1; }
 
-cores=\$(nproc 2>/dev/null || echo 1)
-if [ \"\$cores\" -ge 64 ]; then
+cores=$(nproc 2>/dev/null || echo 1)
+if [ "$cores" -ge 64 ]; then
     cpu_mask=ffffffffffffffff
 else
-    cpu_mask=\$(printf '%x' \$(( (1 << cores) - 1 )))
+    cpu_mask=$(printf '%x' $(( (1 << cores) - 1 )))
 fi
-rps_flow=\$((cores * 32768))
+rps_flow=$((cores * 32768))
 
 command -v ethtool >/dev/null 2>&1 && {
-    ethtool -G \"\$iface\" rx 4096 tx 4096 2>/dev/null || true
-    ethtool -K \"\$iface\" tx-checksumming on rx-checksumming on 2>/dev/null || true
-    ethtool -K \"\$iface\" tso on gso on gro on 2>/dev/null || true
-    ethtool -K \"\$iface\" tx-udp-segmentation on 2>/dev/null || true
-    ethtool -C \"\$iface\" adaptive-rx off adaptive-tx off 2>/dev/null || true
-    ethtool -C \"\$iface\" rx-usecs 16 tx-usecs 16 2>/dev/null || true
+    ethtool -G "$iface" rx 4096 tx 4096 2>/dev/null || true
+    ethtool -K "$iface" tx-checksumming on rx-checksumming on 2>/dev/null || true
+    ethtool -K "$iface" tso on gso on gro on 2>/dev/null || true
+    ethtool -K "$iface" tx-udp-segmentation on 2>/dev/null || true
+    ethtool -C "$iface" adaptive-rx off adaptive-tx off 2>/dev/null || true
+    ethtool -C "$iface" rx-usecs 16 tx-usecs 16 2>/dev/null || true
 }
 
 rx_count=0
-for queue in /sys/class/net/\$iface/queues/rx-*; do
-    [ -d \"\$queue\" ] || continue
-    printf '%s\\n' \"\$cpu_mask\" > \"\$queue/rps_cpus\" 2>/dev/null || true
-    printf '%s\\n' \"\$rps_flow\" > \"\$queue/rps_flow_cnt\" 2>/dev/null || true
-    rx_count=\$((rx_count + 1))
+for queue in /sys/class/net/$iface/queues/rx-*; do
+    [ -d "$queue" ] || continue
+    printf '%s\\n' "$cpu_mask" > "$queue/rps_cpus" 2>/dev/null || true
+    printf '%s\\n' "$rps_flow" > "$queue/rps_flow_cnt" 2>/dev/null || true
+    rx_count=$((rx_count + 1))
 done
-for queue in /sys/class/net/\$iface/queues/tx-*; do
-    [ -d \"\$queue\" ] || continue
-    printf '%s\\n' \"\$cpu_mask\" > \"\$queue/xps_cpus\" 2>/dev/null || true
+for queue in /sys/class/net/$iface/queues/tx-*; do
+    [ -d "$queue" ] || continue
+    printf '%s\\n' "$cpu_mask" > "$queue/xps_cpus" 2>/dev/null || true
 done
 
-tc qdisc replace dev \"\$iface\" root fq 2>/dev/null || true
-if [ \"\$rx_count\" -gt 0 ]; then
-    sysctl -w net.core.rps_sock_flow_entries=\$((rx_count * rps_flow)) >/dev/null 2>&1 || true
+tc qdisc replace dev "$iface" root fq 2>/dev/null || true
+if [ "$rx_count" -gt 0 ]; then
+    sysctl -w net.core.rps_sock_flow_entries=$((rx_count * rps_flow)) >/dev/null 2>&1 || true
 fi
-echo \"[vpnmax-net-tuning] applied iface=\$iface cores=\$cores rx_queues=\$rx_count mask=\$cpu_mask\"
+echo "[vpnmax-net-tuning] applied iface=$iface cores=$cores rx_queues=$rx_count mask=$cpu_mask"
 TUNE
 chmod +x /usr/local/sbin/vpnmax-net-tuning.sh
-cat > /etc/systemd/system/vpnmax-net-tuning.service <<'UNIT'
+atomic_write  /etc/systemd/system/vpnmax-net-tuning.service <<'UNIT'
 [Unit]
 Description=vpnmax persistent network tuning
 After=network-online.target
@@ -321,7 +321,7 @@ RemainAfterExit=yes
 ExecStart=/usr/local/sbin/vpnmax-net-tuning.sh
 [Install]
 WantedBy=multi-user.target
-UNIT"
+UNIT
     run systemctl daemon-reload || true
     if ! run systemctl enable --now vpnmax-net-tuning.service; then
         warn "网络调优 systemd 服务启用失败，重启后可能不会自动恢复网卡参数"

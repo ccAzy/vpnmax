@@ -60,19 +60,58 @@ run_ok() {
     "$@" 2>/dev/null || true
 }
 
+# 原子写入：先写同目录临时文件，内容非空才 mv 覆盖。
+# 为什么需要：sb.json / iptables rules.v4 / systemd drop-in 这类文件写到一半被中断
+# 就是「配置残缺」——轻则服务起不来，重则节点失联。同文件系统内 mv 是原子的。
+# 用法:  cmd | atomic_write /etc/x.conf [备份后缀]
+#        atomic_place /tmp/gen.json /etc/x.json [备份后缀]
+atomic_write() {
+    local target="$1" bak="${2:-}" tmp
+    if ${DRY_RUN:-false}; then
+        info "[dry-run] 原子写 $target"
+        cat >/dev/null 2>&1 || true
+        return 0
+    fi
+    mkdir -p "$(dirname "$target")" 2>/dev/null || true
+    tmp="$(mktemp "${target}.vpnmax.XXXXXX" 2>/dev/null)" || {
+        warn "原子写失败：无法在 $(dirname "$target") 建临时文件"
+        cat >/dev/null 2>&1 || true
+        return 1
+    }
+    if ! cat >"$tmp" 2>/dev/null || [ ! -s "$tmp" ]; then
+        rm -f "$tmp" 2>/dev/null || true
+        warn "原子写失败：内容为空或写入出错（$target 保持原样）"
+        return 1
+    fi
+    atomic_place "$tmp" "$target" "$bak"
+}
+
+# 把已生成的 <src> 原子落位到 <target>（同文件系统内 mv）
+atomic_place() {
+    local src="$1" target="$2" bak="${3:-}"
+    [ -s "$src" ] || {
+        rm -f "$src" 2>/dev/null || true
+        return 1
+    }
+    if [ -n "$bak" ] && [ -e "$target" ]; then
+        cp -a "$target" "${target}.${bak}" 2>/dev/null || true
+    fi
+    chmod --reference="$target" "$src" 2>/dev/null || true
+    chown --reference="$target" "$src" 2>/dev/null || true
+    mv -f "$src" "$target"
+}
+
 # IPv4 优先（gai.conf）幂等单行。bootstrap 与 deploy_optimize 共用，故收在 common。
 # 用 mktemp 而非固定 /tmp 名：脚本以 root 运行，固定名可被本地用户预置符号链接利用。
 ensure_gai_ipv4() {
-    local _tmp
     if grep -q '^precedence ::ffff:0:0/96 100' /etc/gai.conf 2>/dev/null &&
         [ "$(grep -c '^precedence ::ffff:0:0/96 100' /etc/gai.conf 2>/dev/null)" -eq 1 ]; then
         return 0
     fi
-    _tmp=$(mktemp) || return 0
-    grep -v '^precedence ::ffff:0:0/96' /etc/gai.conf >"$_tmp" 2>/dev/null || true
-    cat "$_tmp" >/etc/gai.conf 2>/dev/null || true
-    rm -f "$_tmp" 2>/dev/null || true
-    echo 'precedence ::ffff:0:0/96 100' >>/etc/gai.conf 2>/dev/null
+    {
+        grep -v '^precedence ::ffff:0:0/96' /etc/gai.conf 2>/dev/null || true
+        echo 'precedence ::ffff:0:0/96 100'
+    } | atomic_write /etc/gai.conf "bak"
 }
 
 # 基础依赖（两阶段共用，含 chrony 时间同步）
