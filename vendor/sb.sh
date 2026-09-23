@@ -1100,13 +1100,16 @@ else
 vmadd_argo=cloudflare-ech.com
 fi
 hy2_port=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[2].listen_port')
-hy2_ports=$(iptables -t nat -nL --line 2>/dev/null | grep -w "$hy2_port" | awk '{print $8}' | sed 's/dpts://; s/dpt://' | tr '\n' ',' | sed 's/,$//')
+# 修复：从 iptables 输出中提取 dpts 部分（端口跳跃范围），而非主端口
+# 原逻辑 grep -w "$hy2_port" | awk '{print $8}' 会取到 to:IP:PORT 而非 dpts:RANGE
+hy2_ports=$(iptables -t nat -nL --line 2>/dev/null | grep "dpts:.*to:$hy2_port" | grep -oE 'dpts:[0-9]+:[0-9]+' | sed 's/dpts://' || true)
 if [[ -n $hy2_ports ]]; then
-cmhy2pt=$(echo $hy2_ports | tr ':' '-')
-hyps="&mport=$cmhy2pt"
-sbhy2pt=$(echo "$hy2_ports" | grep -o '[0-9]\+:[0-9]\+' | sed 's/.*/"&"/' | paste -sd,)
+  cmhy2pt=$(echo $hy2_ports | tr ':' '-')
+  hyps="&mport=$cmhy2pt"
+  sbhy2pt=$(echo "$hy2_ports" | grep -oE '[0-9]+:[0-9]+' | sed 's/.*/"&"/' | paste -sd,)
 else
-hyps=
+  hyps=
+  sbhy2pt=
 fi
 ym=$(cat /root/ygkkkca/ca.log 2>/dev/null)
 hy2_sniname=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[2].tls.key_path')
@@ -1127,6 +1130,9 @@ ins_hy2=0
 hy2_ins=false
 fi
 tu5_port=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[3].listen_port')
+# TUIC 端口跳跃范围（固定 43000:45000，写入 mport 让客户端知道走跳跃段）
+tu5_ports="43000:45000"
+cmtu5pt=$(echo "$tu5_ports" | tr ':' '-')
 ym=$(cat /root/ygkkkca/ca.log 2>/dev/null)
 tu5_sniname=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[3].tls.key_path')
 if [[ "$tu5_sniname" = '/etc/s-box/private.key' ]]; then
@@ -1249,7 +1255,12 @@ echo
 restu5(){
 echo
 white "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
-tuic5_link="tuic://$uuid:$uuid@$sb_tu5_ip:$tu5_port?congestion_control=bbr&udp_relay_mode=native&alpn=h3&sni=$tu5_name&insecure=$ins&allowInsecure=$ins&allow_insecure=$ins#tu5-$hostname"
+# TUIC 加入 mport 参数（客户端才知道走 43000-45000 跳跃段）
+tuic_mport_hyps=""
+if [[ -n "$cmtu5pt" ]]; then
+  tuic_mport_hyps="&mport=$cmtu5pt"
+fi
+tuic5_link="tuic://$uuid:$uuid@$sb_tu5_ip:$tu5_port?congestion_control=bbr&udp_relay_mode=native&alpn=h3&sni=$tu5_name&insecure=$ins&allowInsecure=$ins&allow_insecure=$ins$tuic_mport_hyps#tu5-$hostname"
 echo "$tuic5_link" > /etc/s-box/tuic5.txt
 red "🚀【 Tuic-v5 】节点信息如下：" && sleep 2
 echo
@@ -1667,6 +1678,7 @@ proxies:
 - name: tuic5-$hostname                            
   server: $cl_tu5_ip                      
   port: $tu5_port                                    
+  ports: $cmtu5pt
   type: tuic
   uuid: $uuid       
   password: $uuid   
@@ -2770,8 +2782,8 @@ vm_port=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[1].listen_port')
 hy2_port=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[2].listen_port')
 tu5_port=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[3].listen_port')
 an_port=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[4].listen_port')
-hy2_ports=$(iptables -t nat -nL --line 2>/dev/null | grep -w "$hy2_port" | awk '{print $8}' | sed 's/dpts://; s/dpt://' | tr '\n' ',' | sed 's/,$//')
-tu5_ports=$(iptables -t nat -nL --line 2>/dev/null | grep -w "$tu5_port" | awk '{print $8}' | sed 's/dpts://; s/dpt://' | tr '\n' ',' | sed 's/,$//')
+hy2_ports=$(iptables -t nat -nL --line 2>/dev/null | grep "dpts:.*to:$hy2_port" | grep -oE 'dpts:[0-9]+:[0-9]+' | sed 's/dpts://' || true)
+tu5_ports="43000:45000"
 [[ -n $hy2_ports ]] && hy2zfport="$hy2_ports" || hy2zfport="未添加"
 [[ -n $tu5_ports ]] && tu5zfport="$tu5_ports" || tu5zfport="未添加"
 }
