@@ -36,7 +36,10 @@ if [ -r "$VPNMAX_SCRIPT_DIR/lib/boot.sh" ]; then
     . "$VPNMAX_SCRIPT_DIR/lib/boot.sh"
 else
     mkdir -p "$VPNMAX_LIB_HOME" 2>/dev/null || true
-    _boot_new="$VPNMAX_LIB_HOME/boot.sh.$$"
+    _boot_new=$(mktemp "$VPNMAX_LIB_HOME/boot.sh.vpnmax.XXXXXX" 2>/dev/null) || {
+        printf '[x] vpnmax: 无法创建引导临时文件\n' >&2
+        exit 1
+    }
     if curl -fsSL --connect-timeout 5 --max-time 20 \
         "${VPNMAX_RAW:-https://raw.githubusercontent.com/ccAzy/vpnmax/main}/lib/boot.sh" -o "$_boot_new" 2>/dev/null && [ -s "$_boot_new" ]; then
         mv -f "$_boot_new" "$VPNMAX_LIB_HOME/boot.sh"
@@ -255,7 +258,17 @@ PUBLIC_IP=$(curl -fsSL --max-time 5 https://api.ipify.org 2>/dev/null) ||
 # ── GRUB 默认内核校验（防重启后进旧内核） ──
 # ══════════ 主流程 ══════════
 if $DRY_RUN; then echo -e "${YELLOW}═══ DRY-RUN 模式：仅预览，不修改系统 ═══${N}"; fi
-logo() { :; }
+logo() {
+    # B 方案（先行）：VPNMAX 文本横幅 + 版本指纹行，便于截图核对优化基线
+    cat <<'EOF'
+ _   _ ___  _  _ __  __   _   __  __
+| | | | _ \| \| |  \/  | /_\  \ \/ /
+| |_| |  _/| .` | |\/| |/ _ \  >  <
+ \___/|_|  |_|\_|_|  |_/_/ \_\/_/\_\
+EOF
+    printf '  VPNMAX 服务器优化 · lib REV %s\n' "${VPNMAX_LIB_REV:-?}"
+}
+logo
 
 # check_env/install_dependencies 已在依赖阶段完成，这里不重复执行。
 

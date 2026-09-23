@@ -8,6 +8,11 @@ VPNMAX_HARDENING_LOADED=1
 
 apply_hardening() {
     local conf="/etc/sysctl.d/99-vpnmax-security.conf"
+    # RP 过滤覆盖：direct/策略路由场景需 loose(2)，否则回包被丢。默认 strict(1)。
+    # 用法: VPNMAX_RP_FILTER=2 bash deploy_optimize.sh（direct/多出口/策略路由时用 2）
+    local rp="${VPNMAX_RP_FILTER:-1}"
+    case "$rp" in 1|2) ;; *) warn "VPNMAX_RP_FILTER=$rp 非法，回退 1"; rp=1 ;; esac
+    [ "$rp" = "2" ] && info "RP 过滤已放宽为 loose(2，direct/策略路由覆盖)"
     local v6_ra_lines
     # 检测本机是否有 IPv6 地址（无 v6 才关 RA，避免破坏依赖 RA 获址的 VPS）
     if ! ip -6 addr show scope global 2>/dev/null | grep -q 'inet6'; then
@@ -16,9 +21,9 @@ apply_hardening() {
         v6_ra_lines='# 检测到 IPv6 地址，保留 RA 以防破坏 v6 网络配置'
     fi
     atomic_write "$conf" <<SEC
-# vpnmax 安全加固（网络感知生成）
-net.ipv4.conf.all.rp_filter = 1
-net.ipv4.conf.default.rp_filter = 1
+# vpnmax 安全加固（网络感知生成；rp_filter 可经 VPNMAX_RP_FILTER=1|2 覆盖）
+net.ipv4.conf.all.rp_filter = $rp
+net.ipv4.conf.default.rp_filter = $rp
 net.ipv4.tcp_syncookies = 1
 net.ipv4.conf.all.accept_source_route = 0
 net.ipv4.conf.default.accept_source_route = 0

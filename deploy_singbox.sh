@@ -27,7 +27,10 @@ if [ -r "$VPNMAX_SCRIPT_DIR/lib/boot.sh" ]; then
     . "$VPNMAX_SCRIPT_DIR/lib/boot.sh"
 else
     mkdir -p "$VPNMAX_LIB_HOME" 2>/dev/null || true
-    _boot_new="$VPNMAX_LIB_HOME/boot.sh.$$"
+    _boot_new=$(mktemp "$VPNMAX_LIB_HOME/boot.sh.vpnmax.XXXXXX" 2>/dev/null) || {
+        printf '[x] vpnmax: 无法创建引导临时文件\n' >&2
+        exit 1
+    }
     if curl -fsSL --connect-timeout 5 --max-time 20 \
         "${VPNMAX_RAW:-https://raw.githubusercontent.com/ccAzy/vpnmax/main}/lib/boot.sh" -o "$_boot_new" 2>/dev/null && [ -s "$_boot_new" ]; then
         mv -f "$_boot_new" "$VPNMAX_LIB_HOME/boot.sh"
@@ -90,10 +93,10 @@ SB_COMMIT="5001e76efc9e15eac1f8ff33a0b389172e331e1d"
 #   ① acme.sh / CFwarp.sh / sbwpph 改为 pin commit + SHA256 校验（不再裸拉上游 main 后 root 执行）
 #   ② 版本 pin：sing-box 1.13.19 / cloudflared 2026.8.3 / cfst v2.3.5（pin 拉不到才告警回退 latest）
 #   ③ bbr() 改本地最小实现（不再拉 teddysun/across，避免覆盖本项目的 TCP buffer 调优）
-SB_SHA256="43aff2896c561c5399b0363a6d5b94082f6358895d7e65cc01183bf6ae95cb04"
+SB_SHA256="101d4575b2097573dfc34f1a8306f1d7d24c7896ef29fed41670339685d300ba"
 # apply_argo_patch 只把 --protocol http2 改成 auto 后的精确哈希。
 # 只信任这两个当前版本哈希；旧 /etc/s-box/.sb-argo-patched.sha256 不再能“保活”历史 sb.sh。
-SB_ARGO_PATCHED_SHA256="3c587c9a320de57abba8b84cf7258dda5a3e8e0b4e1bbb86581835bb52332bb0"
+SB_ARGO_PATCHED_SHA256="24abbb711fa8254a9494d161f20d64963ff06dc78598c57c113f017d627d6a90"
 SB_URL="https://raw.githubusercontent.com/ccAzy/vpnmax/main/vendor/sb.sh"
 
 # ── 环境预检 + 第二阶段依赖兜底 ──
@@ -167,7 +170,18 @@ check_env() {
 # ── 防主动探测（独立命名链；重跑/卸载只动 VPNMAX_ANTIPROBE，绝不 delete 全局 INPUT 规则） ──
 # ══════════ 主流程 ══════════
 main() {
-    logo() { :; }
+    logo() {
+        # B 方案（先行）：VPNMAX 文本横幅 + 版本/哈希指纹行，便于截图核对部署基线
+        cat <<'EOF'
+ _   _ ___  _  _ __  __   _   __  __
+| | | | _ \| \| |  \/  | /_\  \ \/ /
+| |_| |  _/| .` | |\/| |/ _ \  >  <
+ \___/|_|  |_|\_|_|  |_/_/ \_\/_/\_\
+EOF
+        printf '  VPNMAX sing-box 部署 · lib REV %s · sb %s\n' \
+            "${VPNMAX_LIB_REV:-?}" "${SB_SHA256:0:12}"
+    }
+    logo
     if $DRY_RUN; then echo -e "${YELLOW}═══ DRY-RUN 模式：仅预览，不修改系统 ═══${N}"; fi
     # 品牌切割：先接管旧 vpnplus 资产（units/keepalive/cron/marker），再走新流程
     if declare -F migrate_legacy_units >/dev/null 2>&1; then migrate_legacy_units || true; fi

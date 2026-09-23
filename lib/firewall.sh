@@ -163,16 +163,45 @@ apply_antiprobe() {
 
     # 5) SSH 爆破防御（轻量 fail2ban）
     # SSH 端口不写死 22：2026-09-23 实测服务器 SSH 常在 6688，写死 22 等于保护了错端口。
-    # 解析顺序：环境变量 SSH_PORT > sshd 自身解析（用绝对路径，避免 /usr/local/sbin 影子二进制）> 读配置 > 22
-    local _ssh_port="${SSH_PORT:-}"
-    [ -n "$_ssh_port" ] || _ssh_port=$(/usr/sbin/sshd -T 2>/dev/null | awk '/^port /{print $2; exit}')
-    [ -n "$_ssh_port" ] || _ssh_port=$(grep -rhsE '^[[:space:]]*Port[[:space:]]+' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null | awk '{print $2}' | head -1)
-    _ssh_port="${_ssh_port:-22}"
-    info "SSH 爆破防御目标端口: $_ssh_port"
-    run iptables -A "$CHAIN_ANTIPROBE" -p tcp --dport "$_ssh_port" -m state --state NEW -m hashlimit \
-        --hashlimit-above "$SSH_RATE_ABOVE"/min --hashlimit-burst "$SSH_RATE_BURST" --hashlimit-mode srcip --hashlimit-name probeSSH -j DROP
-    command -v ip6tables >/dev/null 2>&1 && run ip6tables -A "$CHAIN_ANTIPROBE" -p tcp --dport "$_ssh_port" -m state --state NEW -m hashlimit \
-        --hashlimit-above "$SSH_RATE_ABOVE"/min --hashlimit-burst "$SSH_RATE_BURST" --hashlimit-mode srcip --hashlimit-name probeSSH -j DROP || true
+    # 解析顺序：环境变量 SSH_PORT > sshd 自身解析（-T 已展开 Include，取全量多 Port）> 读配置（展 Include、跳 Match 块、取多 Port）> 22
+    # Debian/Ubuntu 均 /etc/ssh/sshd_config + sshd_config.d/*.conf + /usr/sbin/sshd，语义一致。
+    local _ssh_ports="" _p
+    if [ -n "${SSH_PORT:-}" ]; then
+        _ssh_ports="$SSH_PORT"
+    else
+        _ssh_ports=$(/usr/sbin/sshd -T -f /etc/ssh/sshd_config 2>/dev/null | awk 'tolower($1)=="port"{print $2}' | sort -nu | tr '\n' ' ' || true)
+        if [ -z "$_ssh_ports" ]; then
+            _ssh_ports=$(/usr/sbin/sshd -T 2>/dev/null | awk 'tolower($1)=="port"{print $2}' | sort -nu | tr '\n' ' ' || true)
+        fi
+        if [ -z "$_ssh_ports" ]; then
+            # 回退：手展 Include 行，跳过 Match 块内 Port（条件生效后端口不同，不做全局限速）
+            _ssh_ports=$(awk '
+                /^[[:space:]]*Include[[:space:]]+/ { for (i=2;i<=NF;i++) print $i; next }
+                /^[[:space:]]*Port[[:space:]]+/ { print $2 }
+            ' /etc/ssh/sshd_config 2>/dev/null | head -20 || true)
+            for _inc in /etc/ssh/sshd_config.d/*.conf; do
+                [ -f "$_inc" ] || continue
+                _p=$(awk 'BEGIN{inmatch=0} /^[[:space:]]*Match[[:space:]]/ {inmatch=1; next} inmatch==0 && /^[[:space:]]*[Pp][Oo][Rr][Tt][[:space:]]+/ {print $2}' "$_inc" 2>/dev/null || true)
+                [ -n "$_p" ] && _ssh_ports="$_ssh_ports $_p"
+            done
+            # 主文件 Match 块内 Port 同样排除
+            _ssh_ports=$(printf '%s' "$_ssh_ports" | tr ' ' '\n' | grep -E '^[0-9]+$' | sort -nu | tr '\n' ' ' || true)
+            _main_ports=$(awk 'BEGIN{inmatch=0} /^[[:space:]]*Match[[:space:]]/ {inmatch=1; next} inmatch==0 && /^[[:space:]]*[Pp][Oo][Rr][Tt][[:space:]]+/ {print $2}' /etc/ssh/sshd_config 2>/dev/null | sort -nu | tr '\n' ' ' || true)
+            if [ -n "$_main_ports" ]; then
+                _ssh_ports="$_main_ports $_ssh_ports"
+                _ssh_ports=$(printf '%s' "$_ssh_ports" | tr ' ' '\n' | grep -E '^[0-9]+$' | sort -nu | tr '\n' ' ' || true)
+            fi
+        fi
+    fi
+    _ssh_ports=$(printf '%s' "$_ssh_ports" | tr ' ' '\n' | grep -E '^[0-9]+$' | sort -nu | tr '\n' ' ' || true)
+    [ -n "$_ssh_ports" ] || _ssh_ports="22"
+    info "SSH 爆破防御目标端口: $_ssh_ports"
+    for _p in $_ssh_ports; do
+        run iptables -A "$CHAIN_ANTIPROBE" -p tcp --dport "$_p" -m state --state NEW -m hashlimit \
+            --hashlimit-above "$SSH_RATE_ABOVE"/min --hashlimit-burst "$SSH_RATE_BURST" --hashlimit-mode srcip --hashlimit-name probeSSH -j DROP
+        command -v ip6tables >/dev/null 2>&1 && run ip6tables -A "$CHAIN_ANTIPROBE" -p tcp --dport "$_p" -m state --state NEW -m hashlimit \
+            --hashlimit-above "$SSH_RATE_ABOVE"/min --hashlimit-burst "$SSH_RATE_BURST" --hashlimit-mode srcip --hashlimit-name probeSSH -j DROP || true
+    done
 
     # 6) 单 IP 连接数上限
     for p in "${TCP_PORTS[@]}"; do
@@ -229,6 +258,19 @@ config_port_hopping() {
             done_hop=true
         } || break
     done
+    # v6 对称清理：与上段同条件镜像一条 ip6tables 循环（幂等、无 ip6tables 时跳过）
+    if command -v ip6tables >/dev/null 2>&1; then
+        while :; do
+            local rnum6
+            rnum6=$(ip6tables -t nat -L PREROUTING -n --line-numbers 2>/dev/null |
+                awk -v hy="$HOP_HY_RANGE" -v tu="$HOP_TU_RANGE" '$2=="DNAT"||$2=="REDIRECT" { if ($0 ~ hy || $0 ~ tu) {print $1; exit} }')
+            [ -z "$rnum6" ] && break
+            run ip6tables -t nat -D PREROUTING "$rnum6" 2>/dev/null && {
+                ok "清除残留规则(v6) #$rnum6"
+                done_hop=true
+            } || break
+        done
+    fi
     if [ "$done_hop" = false ]; then info "PREROUTING 端口跳跃段已干净，无需清理（幂等）"; fi
 
     if { [ -n "$HY_PORT" ] && [ "$HY_PORT" != "null" ]; } || { [ -n "$TU_PORT" ] && [ "$TU_PORT" != "null" ]; }; then
@@ -244,9 +286,17 @@ config_port_hopping() {
         run iptables -t nat -A PREROUTING -j "$CHAIN_PORTHOP"
         if command -v ip6tables >/dev/null 2>&1; then
             run ip6tables -t nat -N "$CHAIN_PORTHOP" 2>/dev/null || true
-            [ -n "$HY_PORT" ] && [ "$HY_PORT" != "null" ] && run ip6tables -t nat -A "$CHAIN_PORTHOP" -p udp --dport "$HOP_HY_RANGE" -j DNAT --to-destination :"$HY_PORT" || true
-            [ -n "$TU_PORT" ] && [ "$TU_PORT" != "null" ] && run ip6tables -t nat -A "$CHAIN_PORTHOP" -p udp --dport "$HOP_TU_RANGE" -j DNAT --to-destination :"$TU_PORT" || true
+            if [ -n "$HY_PORT" ] && [ "$HY_PORT" != "null" ]; then
+                run ip6tables -t nat -A "$CHAIN_PORTHOP" -p udp --dport "$HOP_HY_RANGE" -j DNAT --to-destination :"$HY_PORT"
+                ok "Hysteria2 端口跳跃(v6): ${HOP_HY_RANGE/:/-} → $HY_PORT"
+            fi
+            if [ -n "$TU_PORT" ] && [ "$TU_PORT" != "null" ]; then
+                run ip6tables -t nat -A "$CHAIN_PORTHOP" -p udp --dport "$HOP_TU_RANGE" -j DNAT --to-destination :"$TU_PORT"
+                ok "Tuic5 端口跳跃(v6): ${HOP_TU_RANGE/:/-} → $TU_PORT"
+            fi
             run ip6tables -t nat -A PREROUTING -j "$CHAIN_PORTHOP"
+        else
+            info "ip6tables 不存在，跳过 v6 跳跃规则（v4 已生效）"
         fi
     fi
 
@@ -300,6 +350,14 @@ if ! declare -F clean_chains >/dev/null 2>&1; then
                 run iptables -t nat -D PREROUTING "$num"
             done
         }
+        # v6 对称清理：同条件镜像删 ip6tables PREROUTING 残留（无 ip6tables 时跳过）
+        command -v ip6tables >/dev/null 2>&1 && {
+            ip6tables -t nat -L PREROUTING --line-numbers -n 2>/dev/null |
+                grep -E '(DNAT|REDIRECT).*dpts:(40000:42000|43000:45000|40000:41000|43000:44000) ' |
+                awk '{print $1}' | sort -rn | while read -r num; do
+                run ip6tables -t nat -D PREROUTING "$num"
+            done
+        } || true
         ok "独立防火墙链已清理（未触碰第三方规则）"
     }
 fi

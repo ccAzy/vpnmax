@@ -13,6 +13,11 @@
   R4 所有 shell 文件 bash -n 通过
   R5 lib 每个模块必须有重复-source 守卫
   R6 头部注释区不得夹带未注释行（漏写 # 会把用法文本当命令执行）
+  R7 版本/哈希联动（2026-09-23 更新链断点复盘）：
+      R7a 改 vendor/sb.sh 必重算 deploy_singbox.sh 双哈希
+             （SB_SHA256=原版，SB_ARGO_PATCHED_SHA256=http2→auto 补丁版）
+      R7b VPNMAX_LIB_REV 格式门（改 lib/ 必 bump）+ BOOT_SHA256 非空且等于
+             归一化自哈希（sed 值置空后 sha256；改 boot.sh 必重算）
 
 用法: python3 tools/check-lib-integrity.py
 退出码: 0 通过 / 1 有违规
@@ -68,7 +73,7 @@ ro = set()
 for f in sorted((ROOT / "lib").rglob("*.sh")):
     ro |= set(
         re.findall(
-            r"^\s*readonly\s+([A-Z][A-Z0-9_]*)=", f.read_text(encoding="utf-8"), re.M
+            r"^\s*readonly\s+([A-Z][A-Z0-9_]*)=", f.read_text(encoding="utf-8", errors="replace"), re.M
         )
     )
 for e in ENTRIES:
@@ -86,6 +91,7 @@ for p in shells:
         ["bash", "-n", p.relative_to(ROOT).as_posix()],
         capture_output=True,
         text=True,
+        errors="replace",
         check=False,
     )
     if r.returncode != 0:
@@ -97,7 +103,7 @@ for p in shells:
 for p in sorted((ROOT / "lib").rglob("*.sh")):
     if p.name == "boot.sh":
         continue
-    if not re.search(r"^VPNMAX_[A-Z_]*LOADED=", p.read_text(encoding="utf-8"), re.M):
+    if not re.search(r"^VPNMAX_[A-Z_]*LOADED=", p.read_text(encoding="utf-8", errors="replace"), re.M):
         violations.append(
             f"R5 {p.relative_to(ROOT)} 缺少重复-source 守卫（VPNMAX_*_LOADED）"
         )
@@ -128,11 +134,58 @@ for p in shells:
             f"R6 {rel}:{i} 头部注释区出现未注释行（会被当作命令执行，补 `# `）: {ln.strip()[:70]}"
         )
 
+# ── R7 版本/哈希联动门禁 ──
+# 背景（2026-09-23 连踩两次）：vendor 更新但 SB_SHA256 未重算 → 安装校验失败；
+# lib 修复但 VPNMAX_LIB_REV 未 bump → 服务器缓存冻结、修复永远到不了线上。
+import hashlib
+
+# R7a：双哈希一致性
+_sb = ROOT / "vendor" / "sb.sh"
+_deploy = read("deploy_singbox.sh")
+if _sb.is_file():
+    raw = _sb.read_bytes()
+    m = re.search(r'^SB_SHA256="([0-9a-f]{64})"', _deploy, re.M)
+    if not m:
+        violations.append("R7a deploy_singbox.sh 缺少 SB_SHA256 常量")
+    elif m.group(1) != hashlib.sha256(raw).hexdigest():
+        violations.append(
+            "R7a SB_SHA256 与 vendor/sb.sh 实哈希不一致（改 vendor 必重算双哈希）"
+        )
+    m2 = re.search(r'^SB_ARGO_PATCHED_SHA256="([0-9a-f]{64})"', _deploy, re.M)
+    patched = _sb.read_text(encoding="utf-8", errors="replace").replace(
+        "--protocol http2", "--protocol auto"
+    )
+    if not m2:
+        violations.append("R7a deploy_singbox.sh 缺少 SB_ARGO_PATCHED_SHA256 常量")
+    elif m2.group(1) != hashlib.sha256(patched.encode("utf-8")).hexdigest():
+        violations.append(
+            "R7a SB_ARGO_PATCHED_SHA256 与补丁版实哈希不一致（改 vendor 必重算双哈希）"
+        )
+else:
+    violations.append("R7a vendor/sb.sh 缺失，无法校验双哈希")
+
+# R7b：REV 格式 + BOOT 自哈希
+_boot = read("lib/boot.sh")
+mb = re.search(r'^VPNMAX_LIB_REV="([^"]+)"', _boot, re.M)
+if not mb or not re.fullmatch(r"20\d{2}-\d{2}-\d{2}\.\d+", mb.group(1)):
+    violations.append(
+        f"R7b VPNMAX_LIB_REV 格式非法（{mb.group(1) if mb else '缺失'}；改 lib/ 必 bump 为 YYYY-MM-DD.N）"
+    )
+mh = re.search(r'^BOOT_SHA256="([^"]*)"', _boot, re.M)
+if not mh or not mh.group(1):
+    violations.append("R7b BOOT_SHA256 为空（改 boot.sh 必重算自哈希，见 lib/boot.sh 注释）")
+else:
+    normalized = re.sub(
+        r'^BOOT_SHA256=".*"', 'BOOT_SHA256=""', _boot, count=1, flags=re.M
+    )
+    if hashlib.sha256(normalized.encode("utf-8")).hexdigest() != mh.group(1):
+        violations.append("R7b BOOT_SHA256 与归一化自哈希不一致（改 boot.sh 必重算）")
+
 # ── 报告（不判失败）：入口脚本里出现、但 lib/本文件都没有定义的标识符 ──
 defined = set()
 for src in list((ROOT / "lib").rglob("*.sh")):
     defined |= set(
-        re.findall(r"^\s*([a-z_][a-z0-9_]*)\(\)", src.read_text(encoding="utf-8"), re.M)
+        re.findall(r"^\s*([a-z_][a-z0-9_]*)\(\)", src.read_text(encoding="utf-8", errors="replace"), re.M)
     )
 for e in ENTRIES:
     defined |= set(re.findall(r"^([a-z_][a-z0-9_]*)\(\)", read(e), re.M))
@@ -180,13 +233,13 @@ for e in ENTRIES:
                 continue
             notes.append(f"  {e}:{i + 1} {n}")
 
-print(f"✓ R1-R6 全部通过：{len(shells)} 个 shell 文件，{len(ENTRIES)} 个入口脚本")
+print(f"[OK] R1-R7 全部通过：{len(shells)} 个 shell 文件，{len(ENTRIES)} 个入口脚本")
 if notes:
     print(f"\n参考（可能的外部命令调用，未判失败，{len(notes)} 项）：")
     print("\n".join(notes[:15]))
 
 if violations:
-    print(f"\n✗ {len(violations)} 项违规：")
+    print(f"\n[X] {len(violations)} 项违规：")
     for v in violations:
         print("  " + v)
     sys.exit(1)

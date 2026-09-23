@@ -3,6 +3,42 @@
 [ -n "${VPNMAX_OPTIMIZE_LOADED:-}" ] && return 0
 VPNMAX_OPTIMIZE_LOADED=1
 
+# 原子 sysctl 补丁：整文件重写经 atomic_write 落盘（幂等可重入，并发/中断不留半文件）。
+# 用法: vpnmax_sysctl_set <conf> <key> <value>  — key 不存在则追加，存在则整行替换。
+vpnmax_sysctl_set() {
+    local conf="$1" key="$2" val="$3" tmp
+    local esc_key esc_val
+    esc_key=$(printf '%s' "$key" | sed 's/[][^$.*\\]/\\&/g')
+    esc_val=$(printf '%s' "$val" | sed 's/[&\\]/\\&/g')
+    tmp=$(mktemp 2>/dev/null) || return 1
+    if [ -f "$conf" ]; then
+        sed "s|^${esc_key}[[:space:]]*=.*|${key} = ${esc_val}|" "$conf" >"$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+        if ! grep -qE "^${esc_key}[[:space:]]*=" "$tmp" 2>/dev/null; then
+            printf '%s = %s\n' "$key" "$val" >>"$tmp"
+        fi
+    else
+        printf '%s = %s\n' "$key" "$val" >"$tmp"
+    fi
+    atomic_place "$tmp" "$conf" "bak"
+}
+
+# GRUB 文件备份+重载：备份到 $BAK_DIR（默认 /var/backups/vpnmax），优先 update-grub，回退 grub-mkconfig。
+vpnmax_grub_backup() {
+    local bakdir="${BAK_DIR:-/var/backups/vpnmax}/grub-$(date +%Y%m%d)"
+    run mkdir -p "$bakdir" 2>/dev/null || true
+    run cp -a /etc/default/grub "$bakdir/grub" 2>/dev/null || true
+}
+vpnmax_grub_update() {
+    if run update-grub 2>/dev/null; then
+        return 0
+    fi
+    warn "update-grub 不可用/失败，回退 grub-mkconfig -o /boot/grub/grub.cfg"
+    run grub-mkconfig -o /boot/grub/grub.cfg || {
+        warn "grub-mkconfig 亦失败，GRUB 更改仅在 /etc/default/grub，下次 update-grub 生效"
+        return 1
+    }
+}
+
 install_bbrv3() {
     # vpnmax融合：内核产物自供（本仓 kernel/ 定时构建发 release）。
     # BBR_RELEASE_REPO 默认 ccAzy/vpnmax；在 vpnmax 首个构建落地前桥接回退老仓（过渡期，用 warn 标明）。
@@ -114,10 +150,20 @@ install_bbrv3() {
         return 1
     fi
 
-    # grub 菜单可见（部分 VPS 默认 timeout=0）
-    if grep -q '^GRUB_TIMEOUT=0' /etc/default/grub 2>/dev/null; then
-        run sed -i 's/^GRUB_TIMEOUT=0/GRUB_TIMEOUT=10/g' /etc/default/grub
-        run update-grub || warn "update-grub 失败，GRUB 菜单可能未更新"
+    # grub 菜单可见（部分 VPS 默认 timeout=0；Ubuntu 默认 TIMEOUT_STYLE=hidden，timeout 再大也不显示菜单）
+    if grep -q '^GRUB_TIMEOUT=0' /etc/default/grub 2>/dev/null || grep -q '^GRUB_TIMEOUT_STYLE=hidden' /etc/default/grub 2>/dev/null; then
+        vpnmax_grub_backup || true
+        if grep -q '^GRUB_TIMEOUT=' /etc/default/grub 2>/dev/null; then
+            run sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=10/' /etc/default/grub
+        else
+            run bash -c 'printf "%s\n" "GRUB_TIMEOUT=10" >> /etc/default/grub'
+        fi
+        if grep -q '^GRUB_TIMEOUT_STYLE=' /etc/default/grub 2>/dev/null; then
+            run sed -i 's/^GRUB_TIMEOUT_STYLE=.*/GRUB_TIMEOUT_STYLE=menu/' /etc/default/grub
+        else
+            run bash -c 'printf "%s\n" "GRUB_TIMEOUT_STYLE=menu" >> /etc/default/grub'
+        fi
+        vpnmax_grub_update || warn "GRUB 菜单可能未更新（已备份，见 \$BAK_DIR/grub-*）"
     fi
     rm -f /tmp/bbrv3.deb
     ok "BBRv3 已安装（重启后生效）"
@@ -392,9 +438,19 @@ ensure_grub_boot() {
     fi
 
     local _esc="${path//&/\\&}"
-    run sed -i "s|^GRUB_DEFAULT=.*|GRUB_DEFAULT=\"$_esc\"|" /etc/default/grub
-    if ! run update-grub; then
-        warn "update-grub 失败，GRUB 默认项可能未保存"
+    vpnmax_grub_backup || true
+    if grep -q '^GRUB_DEFAULT=' /etc/default/grub 2>/dev/null; then
+        run sed -i "s|^GRUB_DEFAULT=.*|GRUB_DEFAULT=\"$_esc\"|" /etc/default/grub
+    else
+        run bash -c "printf '%s\n' 'GRUB_DEFAULT=\"$_esc\"' >> /etc/default/grub"
+    fi
+    if ! command -v grub-script-check >/dev/null 2>&1 || grub-script-check /boot/grub/grub.cfg >/dev/null 2>&1; then
+        info "grub.cfg 语法检查通过（或无 grub-script-check，直接更新）"
+    else
+        warn "现 grub.cfg 语法异常，仍尝试更新（已备份，失败可回滚）"
+    fi
+    if ! vpnmax_grub_update; then
+        warn "GRUB 默认项可能未保存（已备份，见 \$BAK_DIR/grub-*）"
         return 1
     fi
     ok "GRUB 默认引导项已设为 BBRv3：$path"
@@ -457,17 +513,19 @@ apply_apac_tuning() {
     info "应用亚太线路 TCP 调优（固定档: wmem 12MB / rmem 32MB）..."
     local wmem_max=12582912 rmem_max=33554432
     local conf="/etc/sysctl.d/99-vpnmax-brutal.conf"
-    # 覆盖 apply_sysctl 写入的 wmem/rmem 值
+    # 全原子写：逐键经 vpnmax_sysctl_set 整文件重写（替代裸 sed -i），运行时经 sysctl --system 生效
     if [ -f "$conf" ]; then
-        sed -i "s|^net.ipv4.tcp_wmem = .*|net.ipv4.tcp_wmem = 4096 16384 $wmem_max|" "$conf"
-        sed -i "s|^net.ipv4.tcp_rmem = .*|net.ipv4.tcp_rmem = 4096 131072 $rmem_max|" "$conf"
-        sed -i "s|^net.core.rmem_max = .*|net.core.rmem_max = $rmem_max|" "$conf"
-        sed -i "s|^net.core.wmem_max = .*|net.core.wmem_max = $wmem_max|" "$conf"
+        vpnmax_sysctl_set "$conf" "net.ipv4.tcp_wmem" "4096 16384 $wmem_max" || true
+        vpnmax_sysctl_set "$conf" "net.ipv4.tcp_rmem" "4096 131072 $rmem_max" || true
+        vpnmax_sysctl_set "$conf" "net.core.rmem_max" "$rmem_max" || true
+        vpnmax_sysctl_set "$conf" "net.core.wmem_max" "$wmem_max" || true
     fi
-    sysctl -w net.ipv4.tcp_wmem="4096 16384 $wmem_max" >/dev/null 2>&1 || true
-    sysctl -w net.ipv4.tcp_rmem="4096 131072 $rmem_max" >/dev/null 2>&1 || true
-    sysctl -w net.core.rmem_max="$rmem_max" >/dev/null 2>&1 || true
-    sysctl -w net.core.wmem_max="$wmem_max" >/dev/null 2>&1 || true
+    run sysctl --system >/dev/null 2>&1 || {
+        run sysctl -w net.ipv4.tcp_wmem="4096 16384 $wmem_max" >/dev/null 2>&1 || true
+        run sysctl -w net.ipv4.tcp_rmem="4096 131072 $rmem_max" >/dev/null 2>&1 || true
+        run sysctl -w net.core.rmem_max="$rmem_max" >/dev/null 2>&1 || true
+        run sysctl -w net.core.wmem_max="$wmem_max" >/dev/null 2>&1 || true
+    }
     ok "亚太 TCP 调优已生效（wmem_max=$((wmem_max / 1024 / 1024))MB, rmem_max=$((rmem_max / 1024 / 1024))MB）"
     manifest "apac_tuning wmem_max=$wmem_max rmem_max=$rmem_max"
 }
@@ -511,15 +569,17 @@ apply_smart_bandwidth_tuning() {
     buf_bytes=$((buf_mb * 1024 * 1024))
     local conf="/etc/sysctl.d/99-vpnmax-brutal.conf"
     if [ -f "$conf" ]; then
-        sed -i "s|^net.ipv4.tcp_wmem = .*|net.ipv4.tcp_wmem = 4096 65536 $buf_bytes|" "$conf"
-        sed -i "s|^net.ipv4.tcp_rmem = .*|net.ipv4.tcp_rmem = 4096 87380 $buf_bytes|" "$conf"
-        sed -i "s|^net.core.rmem_max = .*|net.core.rmem_max = $buf_bytes|" "$conf"
-        sed -i "s|^net.core.wmem_max = .*|net.core.wmem_max = $buf_bytes|" "$conf"
+        vpnmax_sysctl_set "$conf" "net.ipv4.tcp_wmem" "4096 65536 $buf_bytes" || true
+        vpnmax_sysctl_set "$conf" "net.ipv4.tcp_rmem" "4096 87380 $buf_bytes" || true
+        vpnmax_sysctl_set "$conf" "net.core.rmem_max" "$buf_bytes" || true
+        vpnmax_sysctl_set "$conf" "net.core.wmem_max" "$buf_bytes" || true
     fi
-    sysctl -w net.ipv4.tcp_wmem="4096 65536 $buf_bytes" >/dev/null 2>&1 || true
-    sysctl -w net.ipv4.tcp_rmem="4096 87380 $buf_bytes" >/dev/null 2>&1 || true
-    sysctl -w net.core.rmem_max="$buf_bytes" >/dev/null 2>&1 || true
-    sysctl -w net.core.wmem_max="$buf_bytes" >/dev/null 2>&1 || true
+    run sysctl --system >/dev/null 2>&1 || {
+        run sysctl -w net.ipv4.tcp_wmem="4096 65536 $buf_bytes" >/dev/null 2>&1 || true
+        run sysctl -w net.ipv4.tcp_rmem="4096 87380 $buf_bytes" >/dev/null 2>&1 || true
+        run sysctl -w net.core.rmem_max="$buf_bytes" >/dev/null 2>&1 || true
+        run sysctl -w net.core.wmem_max="$buf_bytes" >/dev/null 2>&1 || true
+    }
     ok "智能带宽调优已生效（区域=$region, 带宽=${bandwidth}Mbit, buffer=${buf_mb}MB, cap=${cap}MB）"
     manifest "smart_tuning region=$region bandwidth=${bandwidth}Mbit buffer=${buf_mb}MB cap=${cap}MB"
 }

@@ -3,6 +3,29 @@
 [ -n "${VPNMAX_ARGO_LOADED:-}" ] && return 0
 VPNMAX_ARGO_LOADED=1
 
+# argo-extra.conf 白名单校验（P0-5 root RCE 防线）。
+# 规则：注释/# 与空行跳过；含 shell 元字符（;|&$``()<>!"'）整行丢弃并告警；
+# 仅放行 `--flag` 与 `[A-Za-z0-9.:=_/-]` 值 token。返回空格分隔的安全参数串。
+vpnmax_argo_extra_args() {
+    local extra="${1:-}" line tok ok_args=""
+    [ -s "$extra" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in ''|'#'*) continue ;; esac
+        if printf '%s' "$line" | tr -d 'A-Za-z0-9 _.:=/-' | grep -q .; then
+            printf '[!]   argo-extra.conf 含 shell 元字符，整行丢弃：%.80s\n' "$line" >&2
+            continue
+        fi
+        for tok in $line; do
+            if printf '%s' "$tok" | grep -qE '^--[a-z-]+$|^[A-Za-z0-9.:=_/-]+$'; then
+                ok_args="$ok_args $tok"
+            else
+                printf '[!]   argo-extra.conf 非法 token，已丢弃：%.40s\n' "$tok" >&2
+            fi
+        done
+    done <"$extra"
+    printf '%s' "$ok_args"
+}
+
 start_argo() {
     [ -f /etc/s-box/sb.json ] || {
         warn "sb.json 不存在，跳过 Argo"
@@ -54,7 +77,7 @@ ensure_argo_extra_applied() {
         return 0
     fi
     local want_run cur_run
-    want_run=$(grep -v '^#' "$extra" 2>/dev/null | tr '\n' ' ' || true)
+    want_run=$(vpnmax_argo_extra_args "$extra" || true)
     [ -z "$(echo "$want_run" | tr -d ' ')" ] && return 0
     cur_run=$(pgrep -af 'cloudflared.*tunnel.*--url' 2>/dev/null | head -1 || true)
     [ -z "$cur_run" ] && return 0
@@ -92,8 +115,10 @@ ensure_argo_extra_applied() {
     }
     pkill -x cloudflared 2>/dev/null || true
     sleep 3
-    # shellcheck disable=SC2086
-    nohup "$cfbin" tunnel --url "http://localhost:$wsport" --no-autoupdate --protocol auto $want_run >/etc/s-box/argo.log 2>&1 &
+    # 数组传参：want_run 已过白名单（仅 --flag 与安全值），杜绝无引号拼接注入
+    local -a want_arr=()
+    read -ra want_arr <<< "$want_run" || true
+    nohup "$cfbin" tunnel --url "http://localhost:$wsport" --no-autoupdate --protocol auto "${want_arr[@]}" >/etc/s-box/argo.log 2>&1 &
     sleep 20
     local cnt
     cnt=$(pgrep -c -x cloudflared 2>/dev/null || echo 0)
@@ -147,9 +172,12 @@ restart_tunnel() {
     sleep 1
     # G4修复：@reboot cron 与 keepalive 竞态会导致双进程；启动后只保留最新一个
     : > "$LOG"
+    # P0-5：extra 参数只取白名单 token（--flag 与安全值），元字符结构性丢弃，不直接 cat 拼接
+    EXTRA_ARGS=$(grep -v '^#' /etc/s-box/argo-extra.conf 2>/dev/null | grep -oE -- '--[a-z-]+|[A-Za-z0-9.:=_/-]+' | tr '\n' ' ' || true)
+    # shellcheck disable=SC2086 # EXTRA_ARGS 已是白名单提取结果，无元字符
     nohup "$CF_BIN" tunnel --url "http://localhost:$WS_PORT" \
       --edge-ip-version auto --no-autoupdate --protocol auto \
-      $(cat /etc/s-box/argo-extra.conf 2>/dev/null) > "$LOG" 2>&1 &
+      $EXTRA_ARGS > "$LOG" 2>&1 &
     sleep 2
     local pids newest
     pids=$(pgrep -f "$TUN_RUNS" 2>/dev/null || true)

@@ -3,6 +3,26 @@
 [ -n "${VPNMAX_SUB_LOADED:-}" ] && return 0
 VPNMAX_SUB_LOADED=1
 
+# ── 订阅安全基线（P0-6/P0-7/P0-8）──
+# token 白名单：8-64 位字母数字/_/-；port：1024-65535 纯数字。命中失败即 fail-closed。
+vpnmax_valid_subtoken() { printf '%s' "${1:-}" | grep -qE '^[A-Za-z0-9_-]{8,64}$'; }
+vpnmax_valid_subport() {
+    case "${1:-}" in '' | *[!0-9]*) return 1 ;; esac
+    [ "$1" -ge 1024 ] && [ "$1" -le 65535 ] 2>/dev/null
+}
+# 高熵随机 token（openssl 优先，/dev/urandom 兜底；绝不复用 UUID 当订阅密码）
+vpnmax_new_subtoken() {
+    local t=""
+    t=$(openssl rand -hex 16 2>/dev/null || true)
+    [ -n "$t" ] || t=$(tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 32 || true)
+    printf '%s' "$t"
+}
+# 私钥/订阅凭证统一 0600（默认 umask 下 echo 重定向会落成 644）
+ensure_sub_perms() {
+    chmod 600 /etc/s-box/private.key /etc/s-box/subtoken.log /etc/s-box/subport.log 2>/dev/null || true
+    chmod 644 /etc/s-box/cert.pem /etc/s-box/public.key 2>/dev/null || true
+}
+
 setup_subscription() {
     info "配置本地订阅链接..."
     sleep 1
@@ -55,6 +75,7 @@ EOSUB
         info "[dry-run] sb 菜单 3-8-1 配置订阅${KEEP_PORT:+（复用端口 $KEEP_PORT）}"
     fi
     if [ -f /etc/s-box/subport.log ] && [ -f /etc/s-box/subtoken.log ]; then
+        ensure_sub_perms
         ok "订阅配置成功"
         return 0
     fi
@@ -67,12 +88,14 @@ get_sub_port() {
     local port=""
     if [ -f /etc/s-box/subport.log ]; then
         port=$(grep -oE '[0-9]{1,5}' /etc/s-box/subport.log 2>/dev/null | head -1 || true)
-        [ -n "$port" ] && {
+        if vpnmax_valid_subport "$port"; then
             echo "$port"
             return 0
-        }
+        fi
+        port=""
     fi
     port=$(ss -tlnp 2>/dev/null | grep -iE 'busybox|httpd|lighttpd|nginx' | awk '{print $4}' | grep -oE '[0-9]+$' | head -1 || true)
+    vpnmax_valid_subport "$port" || return 1
     echo "$port"
 }
 
@@ -99,19 +122,20 @@ wait_subscription() {
 ensure_sub_httpd() {
     local port
     port=$(get_sub_port 2>/dev/null)
-    [ -z "$port" ] && {
-        warn "无法获取订阅端口，跳过订阅服务保障"
+    if ! vpnmax_valid_subport "$port"; then
+        warn "订阅端口非法（${port:-空}），跳过订阅服务保障（防 crontab 注入）"
         return 1
-    }
+    fi
     command -v busybox >/dev/null 2>&1 || {
         warn "busybox 不可用，跳过订阅服务保障"
         return 1
     }
     if ! $DRY_RUN; then
-        (
+        # 回环绑定：订阅 HTTP 只听 127.0.0.1（busybox -p 支持 [IP:]PORT 写法），扫段拖链直接断
+        {
             crontab -l 2>/dev/null | grep -vE 'busybox httpd.*(/root/websbox|subport.log)'
-            echo "@reboot sleep 10 && /bin/bash -c \"busybox httpd -f -p $(cat /etc/s-box/subport.log 2>/dev/null) -h /root/websbox > /dev/null 2>&1 &\""
-        ) | crontab - 2>/dev/null || true
+            echo "@reboot sleep 10 && /bin/bash -c \"busybox httpd -f -p 127.0.0.1:${port} -h /root/websbox > /dev/null 2>&1 &\""
+        } | crontab - 2>/dev/null || true
     else
         info "[dry-run] 写入 @reboot 订阅服务自启"
     fi
@@ -129,7 +153,7 @@ ensure_sub_httpd() {
                 sleep 1
             }
             mkdir -p /root/websbox
-            nohup busybox httpd -f -p "$port" -h /root/websbox >/dev/null 2>&1 &
+            nohup busybox httpd -f -p "127.0.0.1:${port}" -h /root/websbox >/dev/null 2>&1 &
             sleep 2
         fi
         if ss -tln 2>/dev/null | grep -q ":$port"; then
@@ -148,10 +172,10 @@ show_subscription() {
         return 1
     fi
     token=$(tr -cd 'a-zA-Z0-9_-' </etc/s-box/subtoken.log 2>/dev/null || true)
-    [ -n "$token" ] || {
-        warn "订阅 token 为空，无法生成链接"
+    if ! vpnmax_valid_subport "$sub_port" || ! vpnmax_valid_subtoken "$token"; then
+        warn "订阅端口/token 未通过白名单校验（port=[0-9]/1024-65535，token=8-64位字母数字/_/-），拒绝拼链接"
         return 1
-    }
+    fi
     public_ip=$(curl -fsSL --max-time 5 https://api.ipify.org 2>/dev/null ||
         curl -fsSL --max-time 5 https://icanhazip.com 2>/dev/null ||
         echo "你的服务器IP")
