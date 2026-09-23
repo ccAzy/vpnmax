@@ -30,7 +30,7 @@ VPNMAX_VENDOR_FILES="sb.sh"
 
 # lib 版本戳：**每次改动 lib/ 就把它改掉**。服务器靠它判断要不要重拉已缓存的模块——
 # 旧逻辑只补缺失文件，缓存一旦落地就冻结，lib 的修复永远到不了线上（2026-09-23 连踩两次）。
-VPNMAX_LIB_REV="2026-09-23.1"
+VPNMAX_LIB_REV="2026-09-23.2"
 
 # 打印可用的 lib 源目录（以 common.sh 为存在标志）
 vpnmax_lib_src() {
