@@ -1,0 +1,47 @@
+# yamllint disable rule:line-length
+name: 测试与门禁
+
+# 触发面刻意比内核构建宽：内核工作流只在 schedule / workflow_dispatch 跑，
+# 意味着「只改 shell」的提交要等最多 24h 才可能被检查到。
+# 2026-09-23 的 P0（bootstrap.sh / deploy_optimize.sh 头部用法注释漏 `#`
+# → 一键安装把用法文本当命令跑 → 无限递归刷屏）就是这样漏过去的。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # 独立作业：不参与内核构建链路，因此不会阻塞 release，只做单元测试与门禁
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+
+      - name: 安装 bats
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats
+
+      - name: 运行单元测试
+        run: bats tests/
+
+      - name: 安装 shellcheck
+        run: sudo apt-get install -y -qq shellcheck
+
+      - name: shellcheck（自有代码）
+        run: |
+          # SC1090/SC1091 = 非字面量 source（lib 动态加载）；SC2015 = 有意为之的 A && B || C 三元
+          out=$(shellcheck -x --severity=warning -f gcc ./*.sh lib/*.sh lib/verify/*.sh 2>/dev/null | grep -vE 'SC1090|SC1091|SC2015' || true)
+          if [ -n "$out" ]; then echo "$out"; exit 1; fi
+
+      - name: lib 完整性门禁（防「双实现」回归 + R6 头部注释完整性）
+        run: python3 tools/check-lib-integrity.py

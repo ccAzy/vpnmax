@@ -341,30 +341,3 @@ jobs:
           git add x86-64.config arm64.config
           git commit -m "Refresh generated kernel config baselines [skip ci]"
           git push
-
-  test:
-    # 独立作业：不参与内核构建链路，因此不会阻塞 release，只做单元测试
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-
-      - name: 安装 bats
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats
-
-      - name: 运行单元测试
-        run: bats tests/
-
-      - name: 安装 shellcheck
-        run: sudo apt-get install -y -qq shellcheck
-
-      - name: shellcheck（自有代码）
-        run: |
-          # SC1090/SC1091 = 非字面量 source（lib 动态加载）；SC2015 = 有意为之的 A && B || C 三元
-          out=$(shellcheck -x --severity=warning -f gcc ./*.sh lib/*.sh lib/verify/*.sh 2>/dev/null | grep -vE 'SC1090|SC1091|SC2015' || true)
-          if [ -n "$out" ]; then echo "$out"; exit 1; fi
-
-      - name: lib 完整性门禁（防「双实现」回归）
-        run: python3 tools/check-lib-integrity.py
