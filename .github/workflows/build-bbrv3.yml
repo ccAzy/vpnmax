@@ -88,7 +88,7 @@ jobs:
     steps:
       - name: 删除旧的工作流运行记录
         # 固定在 commit 上，不用浮动分支（@main 一旦被上游改写即等于远程代码执行）
-        uses: Mattraks/delete-workflow-runs@0cf693bc9909e5e867ee8f27b813224ba862939c  # main @ 2026-09-12
+        uses: Mattraks/delete-workflow-runs@0cf693bc9909e5e867ee8f27b813224ba862939c # main @ 2026-09-12
         with:
           # 保留 14 天且至少 5 条：原来 retain_days: 0 / keep_minimum_runs: 0 会把失败历史全删光，事后无法追溯
           retain_days: 14
@@ -150,7 +150,7 @@ jobs:
 
       - name: 检出代码
         if: env.BUILD_NEEDED == 'true'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: 安装依赖项
         if: env.BUILD_NEEDED == 'true'
@@ -221,7 +221,7 @@ jobs:
 
       - name: 上传最终配置文件
         if: env.BUILD_NEEDED == 'true' && matrix.profile == 'standard'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: config-${{ matrix.arch }}-${{ matrix.profile }}-${{ env.KERNEL_VERSION }}
           path: ./build-configs/${{ matrix.arch }}*.config
@@ -262,21 +262,21 @@ jobs:
 
       - name: 上传发布标记
         if: env.BUILD_NEEDED == 'true' && env.PUBLISH_NEEDED == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: publish-${{ matrix.arch }}-${{ matrix.profile }}-${{ env.KERNEL_VERSION }}
           path: ./publish-markers/${{ matrix.arch }}-${{ matrix.profile }}
 
       - name: 上传 deb 包
         if: env.BUILD_NEEDED == 'true' && env.PUBLISH_NEEDED == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: deb-${{ matrix.arch }}-${{ matrix.profile }}
           path: ./kernel/linux-*.deb
 
       - name: 发布到 GitHub Release
         if: env.BUILD_NEEDED == 'true' && env.PUBLISH_NEEDED == 'true'
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ matrix.arch }}-${{ env.KERNEL_VERSION }}${{ matrix.release_suffix }}
           files: |
@@ -293,10 +293,10 @@ jobs:
       contents: write
     steps:
       - name: 检出代码
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: 下载本轮最终配置
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         continue-on-error: true
         with:
           pattern: config-*-standard-*
@@ -304,7 +304,7 @@ jobs:
           merge-multiple: true
 
       - name: 下载发布标记
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         continue-on-error: true
         with:
           pattern: publish-*-standard-*

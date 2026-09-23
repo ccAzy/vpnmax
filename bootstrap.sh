@@ -54,7 +54,6 @@ HELP
     esac
 done
 
-
 if [ "$(id -u)" -ne 0 ]; then
     fail "需要 root 权限。请先 sudo -i 切到 root，或在本条命令最前面加 sudo，然后重跑。"
     exit 1

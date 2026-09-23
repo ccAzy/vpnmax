@@ -24,7 +24,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ENTRIES = ["bootstrap.sh", "deploy_optimize.sh", "deploy_singbox.sh", "verify.sh", "cleanup.sh"]
+ENTRIES = [
+    "bootstrap.sh",
+    "deploy_optimize.sh",
+    "deploy_singbox.sh",
+    "verify.sh",
+    "cleanup.sh",
+]
 
 violations = []
 notes = []
@@ -41,41 +47,60 @@ for e in ENTRIES:
         m = re.match(r"^if ! declare -F (\w+) >", ln)
         if not m:
             continue
-        nxt = "\n".join(lines[i + 1:i + 4])
+        nxt = "\n".join(lines[i + 1 : i + 4])
         if re.search(rf"^\s*{m.group(1)}\(\)", nxt, re.M):
-            violations.append(f"R1 {e}:{i+1} 内联兜底块 {m.group(1)}（应只存在于 lib/，单文件模式由 boot.sh 自举）")
+            violations.append(
+                f"R1 {e}:{i + 1} 内联兜底块 {m.group(1)}（应只存在于 lib/，单文件模式由 boot.sh 自举）"
+            )
 
 # ── R2 必须走引导 ──
 for e in ENTRIES:
     t = read(e)
     if "vpnmax_load" not in t:
-        violations.append(f"R2 {e} 未调用 vpnmax_load（入口脚本必须经 boot.sh 加载 lib）")
+        violations.append(
+            f"R2 {e} 未调用 vpnmax_load（入口脚本必须经 boot.sh 加载 lib）"
+        )
     if "lib/boot.sh" not in t:
         violations.append(f"R2 {e} 未引用 lib/boot.sh")
 
 # ── R3 readonly 常量重复定义 ──
 ro = set()
 for f in sorted((ROOT / "lib").rglob("*.sh")):
-    ro |= set(re.findall(r"^\s*readonly\s+([A-Z][A-Z0-9_]*)=", f.read_text(encoding="utf-8"), re.M))
+    ro |= set(
+        re.findall(
+            r"^\s*readonly\s+([A-Z][A-Z0-9_]*)=", f.read_text(encoding="utf-8"), re.M
+        )
+    )
 for e in ENTRIES:
     for i, ln in enumerate(read(e).split("\n")):
         m = re.match(r"^\s*(?:readonly\s+)?([A-Z][A-Z0-9_]*)=", ln)
         if m and m.group(1) in ro:
-            violations.append(f"R3 {e}:{i+1} 重复定义 lib 中的 readonly 常量 {m.group(1)}")
+            violations.append(
+                f"R3 {e}:{i + 1} 重复定义 lib 中的 readonly 常量 {m.group(1)}"
+            )
 
 # ── R4 bash -n ──
 shells = sorted(list(ROOT.glob("*.sh")) + list((ROOT / "lib").rglob("*.sh")))
 for p in shells:
-    r = subprocess.run(["bash", "-n", p.relative_to(ROOT).as_posix()], capture_output=True, text=True, check=False)
+    r = subprocess.run(
+        ["bash", "-n", p.relative_to(ROOT).as_posix()],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     if r.returncode != 0:
-        violations.append(f"R4 {p.relative_to(ROOT)} bash -n 失败: {r.stderr.strip().splitlines()[:1]}")
+        violations.append(
+            f"R4 {p.relative_to(ROOT)} bash -n 失败: {r.stderr.strip().splitlines()[:1]}"
+        )
 
 # ── R5 lib 模块守卫 ──
 for p in sorted((ROOT / "lib").rglob("*.sh")):
     if p.name == "boot.sh":
         continue
     if not re.search(r"^VPNMAX_[A-Z_]*LOADED=", p.read_text(encoding="utf-8"), re.M):
-        violations.append(f"R5 {p.relative_to(ROOT)} 缺少重复-source 守卫（VPNMAX_*_LOADED）")
+        violations.append(
+            f"R5 {p.relative_to(ROOT)} 缺少重复-source 守卫（VPNMAX_*_LOADED）"
+        )
 
 # ── R6 头部注释区不得夹带未注释行 ──
 # 背景（2026-09-23 线上事故）：bootstrap.sh / deploy_optimize.sh 的头部用法注释块里
@@ -106,21 +131,54 @@ for p in shells:
 # ── 报告（不判失败）：入口脚本里出现、但 lib/本文件都没有定义的标识符 ──
 defined = set()
 for src in list((ROOT / "lib").rglob("*.sh")):
-    defined |= set(re.findall(r"^\s*([a-z_][a-z0-9_]*)\(\)", src.read_text(encoding="utf-8"), re.M))
+    defined |= set(
+        re.findall(r"^\s*([a-z_][a-z0-9_]*)\(\)", src.read_text(encoding="utf-8"), re.M)
+    )
 for e in ENTRIES:
     defined |= set(re.findall(r"^([a-z_][a-z0-9_]*)\(\)", read(e), re.M))
 
-KEEP = {"if", "then", "else", "elif", "fi", "for", "do", "done", "while", "case", "esac", "function",
-        "return", "local", "readonly", "export", "declare", "set", "unset", "shift", "exit", "echo",
-        "printf", "source", "true", "false", "break", "continue", "in", "not"}
+KEEP = {
+    "if",
+    "then",
+    "else",
+    "elif",
+    "fi",
+    "for",
+    "do",
+    "done",
+    "while",
+    "case",
+    "esac",
+    "function",
+    "return",
+    "local",
+    "readonly",
+    "export",
+    "declare",
+    "set",
+    "unset",
+    "shift",
+    "exit",
+    "echo",
+    "printf",
+    "source",
+    "true",
+    "false",
+    "break",
+    "continue",
+    "in",
+    "not",
+}
 for e in ENTRIES:
     for i, ln in enumerate(read(e).split("\n")):
         code = ln.split("#")[0]
-        for m in re.finditer(r"(?:^|[|&;(]\s*|\b(?:then|do|else)\s+)([a-z_][a-z0-9_]*)\b", code):
+        for m in re.finditer(
+            r"(?:^|[|&;(]\s*|\b(?:then|do|else)\s+)([a-z_][a-z0-9_]*)\b", code
+        ):
             n = m.group(1)
             if n in KEEP or n in defined or n.startswith("vpnmax_"):
                 continue
-            notes.append(f"  {e}:{i+1} {n}")
+            notes.append(f"  {e}:{i + 1} {n}")
 
 print(f"✓ R1-R6 全部通过：{len(shells)} 个 shell 文件，{len(ENTRIES)} 个入口脚本")
 if notes:
