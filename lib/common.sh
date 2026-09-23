@@ -77,7 +77,14 @@ vpnmax_download() {
         awk 'tolower($0) ~ /^content-length:/ {gsub(/[^0-9]/, "", $2); print $2}' | tail -1 || true)
     while [ "$i" -lt 20 ]; do
         i=$((i + 1))
-        if curl -fL# -H "${UA:-User-Agent: vpnmax}" -C - --retry 2 --retry-delay 3 --connect-timeout 15 \
+        # 上一次异常退出可能把文件写超（旧版带 --retry 的副作用）→ 删掉重下
+        if [ -n "$want" ] && [ "$(stat -c%s "$out" 2>/dev/null || echo 0)" -gt "$want" ]; then
+            warn "本地文件比远端大（$(stat -c%s "$out")B > ${want}B），删除重下"
+            rm -f "$out"
+        fi
+        # 刻意不加 --retry：curl 的内部重试不重算续传偏移，会把数据从旧偏移再写一遍
+        # → 文件被写重/写坏。重试一律交给外层 while（每次重新读文件大小、重算 Range）。
+        if curl -fL# -H "${UA:-User-Agent: vpnmax}" -C - --connect-timeout 15 \
             --speed-limit 10240 --speed-time 60 -o "$out" "$url"; then
             break
         fi
