@@ -3,7 +3,7 @@
 [ -n "${VPNMAX_SINGBOX_LOADED:-}" ] && return 0
 VPNMAX_SINGBOX_LOADED=1
 
-# Argo 补丁标记（apply_argo_patch 写入，重跑时据此判定 sb.sh 是否已打过补丁）
+# Argo 补丁哈希记录（apply_argo_patch 写入，仅作部署审计；可信判定以当前双哈希常量为准）
 readonly SB_PATCH_MARKER="/etc/s-box/.sb-argo-patched.sha256"
 
 sb_feed() { # sb_feed <超时秒数> - <<'KEYS'  ... KB: 用 stdin 传入按键
@@ -24,6 +24,44 @@ sb_feed() { # sb_feed <超时秒数> - <<'KEYS'  ... KB: 用 stdin 传入按键
         printf '%s\n' "$out" | sed -E 's/\x1B\[[0-9;]*[mK]//g' >>/var/log/vpnmax-sbfeed.log 2>/dev/null || true
     fi
     printf '%s' "$out"
+}
+
+# /usr/bin/sb 是否需要重新安装：不存在，或用户明确传了 --force。
+# 独立成函数是为了可离线回归；2026-09-23 线上事故正是 FORCE=true 仍保留旧 sb。
+sb_needs_install() {
+    if ! command -v sb >/dev/null 2>&1; then
+        return 0
+    fi
+    ${FORCE:-false}
+}
+
+# 只信任当前 vendor 的原版哈希和当前 Argo 补丁版哈希。
+# 旧 marker 里保存的是“历史补丁哈希”，不能据此信任旧版本，否则更新永远不生效。
+sb_hash_trusted() {
+    local cur="${1:-}"
+    [ -n "$cur" ] || return 1
+    [ "$cur" = "$SB_SHA256" ] && return 0
+    [ -n "${SB_ARGO_PATCHED_SHA256:-}" ] && [ "$cur" = "$SB_ARGO_PATCHED_SHA256" ] && return 0
+    return 1
+}
+
+# 同目录暂存 → 校验暂存文件哈希 → 原子替换。
+# 不能只检查 install 后目标非空：安装失败时旧 sb 仍非空，会把失败误报成成功。
+install_sb_atomic() { # <源文件> <期望SHA256> [目标路径]
+    local src="${1:-}" expected="${2:-}" dest="${3:-/usr/bin/sb}" stage got
+    [ -s "$src" ] && [ -n "$expected" ] || return 1
+    stage="${dest}.vpnmax.$$"
+    rm -f "$stage" 2>/dev/null || true
+    install -m 0755 "$src" "$stage" 2>/dev/null || {
+        rm -f "$stage" 2>/dev/null || true
+        return 1
+    }
+    got=$(sha256sum "$stage" 2>/dev/null | awk '{print $1}' || true)
+    if [ "$got" != "$expected" ]; then
+        rm -f "$stage" 2>/dev/null || true
+        return 1
+    fi
+    mv -f "$stage" "$dest"
 }
 
 # vpnmax融合：sb.sh 零上游获取。顺序：①仓库自带 vendor/sb.sh
@@ -52,9 +90,15 @@ install_singbox_yg() {
         return 0
     fi
     if ${FORCE:-false} && command -v sb &>/dev/null; then info "--force 已启用，强制重装 sing-box-yg"; fi
-    if ! command -v sb &>/dev/null; then
+    # --force 的语义必须是覆盖已有 /usr/bin/sb。旧逻辑仍进入“哈希可信”分支，
+    # 而旧 Argo 补丁哈希一直被 marker 信任，导致新版 vendor/sb.sh 永远装不上服务器。
+    if sb_needs_install; then
         info "获取 sing-box-yg 管理脚本（锁定 commit ${SB_COMMIT:0:8}，vendor 优先零上游）..."
-        local tmp="/tmp/sb.sh.download"
+        local tmp
+        tmp=$(mktemp /tmp/vpnmax-sb.XXXXXX) || {
+            fail "创建 sb.sh 临时文件失败"
+            return 1
+        }
         if ! fetch_sb_sh "$tmp" || [ ! -s "$tmp" ]; then
             fail "sb.sh 获取失败（vendor 缺失且 $SB_URL 不可达）"
             rm -f "$tmp" 2>/dev/null || true
@@ -68,7 +112,11 @@ install_singbox_yg() {
             return 1
         fi
         ok "sb.sh SHA256 校验通过"
-        run install -m 0755 "$tmp" /usr/bin/sb
+        if ! run install_sb_atomic "$tmp" "$actual" /usr/bin/sb; then
+            fail "原子覆盖 /usr/bin/sb 失败，旧文件保持不变"
+            rm -f "$tmp" 2>/dev/null || true
+            return 1
+        fi
         manifest "sb.sh installed commit=${SB_COMMIT} sha256=$actual"
         rm -f "$tmp" 2>/dev/null || true
         [ -s /usr/bin/sb ] || {
@@ -77,17 +125,21 @@ install_singbox_yg() {
         }
         ok "sing-box-yg 管理脚本已安装（commit ${SB_COMMIT:0:8}）"
     else
-        # 重跑复查：即使 sb 已存在，也校验其哈希是否落在可信集合内（原版 或 Argo 补丁版白名单）。
-        # 防：首次校验只保证下载时刻安全，重跑时 /usr/bin/sb 可能已被替换/被 sed 补丁过而失去 pin 意义。
+        # 重跑复查：即使 sb 已存在，也校验其哈希是否等于当前原版或当前 Argo 补丁版。
+        # 历史补丁哈希不自动可信；vendor 更新后必须覆盖旧 sb。
         local cur_sha
         cur_sha=$(sha256sum /usr/bin/sb 2>/dev/null | awk '{print $1}' || true)
-        if [ -n "$cur_sha" ] && [ "$cur_sha" = "$SB_SHA256" ]; then
-            ok "sing-box-yg 哈希与原版一致，保持"
-        elif [ -f "$SB_PATCH_MARKER" ] && [ "$cur_sha" = "$(cat "$SB_PATCH_MARKER" 2>/dev/null || true)" ]; then
-            ok "sing-box-yg 哈希命中补丁白名单（Argo http2→auto 已打）"
+        if [ "$cur_sha" = "$SB_SHA256" ]; then
+            ok "sing-box-yg 哈希与当前 vendor 原版一致，保持"
+        elif sb_hash_trusted "$cur_sha"; then
+            ok "sing-box-yg 哈希命中当前 Argo 补丁版白名单，保持"
         else
             warn "现有 /usr/bin/sb 哈希不在可信集合（原版/补丁版），从 vendor/自家源重新获取覆盖..."
-            local tmp="/tmp/sb.sh.download"
+            local tmp
+            tmp=$(mktemp /tmp/vpnmax-sb.XXXXXX) || {
+                fail "创建 sb.sh 临时文件失败"
+                return 1
+            }
             if ! fetch_sb_sh "$tmp" || [ ! -s "$tmp" ]; then
                 fail "sb.sh 重新获取失败（vendor 缺失且 $SB_URL 不可达）"
                 rm -f "$tmp" 2>/dev/null || true
@@ -100,7 +152,11 @@ install_singbox_yg() {
                 rm -f "$tmp" 2>/dev/null || true
                 return 1
             fi
-            run install -m 0755 "$tmp" /usr/bin/sb
+            if ! run install_sb_atomic "$tmp" "$actual" /usr/bin/sb; then
+                fail "原子覆盖 /usr/bin/sb 失败，旧文件保持不变"
+                rm -f "$tmp" 2>/dev/null || true
+                return 1
+            fi
             manifest "sb.sh re-installed (hash drift) commit=${SB_COMMIT} sha256=$actual"
             rm -f "$tmp" 2>/dev/null || true
             [ -s /usr/bin/sb ] || {

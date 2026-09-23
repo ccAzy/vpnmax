@@ -17,6 +17,34 @@
   [ "$output" = "40000:42000" ]
 }
 
+@test "deploy --force 强制覆盖已有 sb" {
+  run bash -c 'source lib/common.sh; source lib/singbox.sh; command(){ return 0; }; FORCE=false; ! sb_needs_install; FORCE=true; sb_needs_install'
+  [ "$status" -eq 0 ]
+}
+
+@test "只信任当前 sb 原版/补丁哈希，旧 marker 不再保活旧版" {
+  run bash -c 'source lib/common.sh; source lib/singbox.sh; SB_SHA256=raw; SB_ARGO_PATCHED_SHA256=patched; sb_hash_trusted raw; sb_hash_trusted patched; ! sb_hash_trusted stale'
+  [ "$status" -eq 0 ]
+}
+
+@test "sb 原子安装失败不会用旧非空文件冒充成功" {
+  run bash -c 'source lib/common.sh; source lib/singbox.sh; d=$(mktemp -d); printf old >"$d/sb"; src=$(mktemp); printf new >"$src"; expected=$(sha256sum "$src" | awk "{print \$1}"); install_sb_atomic "$src" "$expected" "$d/sb"; test "$(cat "$d/sb")" = new; ! install_sb_atomic "$src" wrong "$d/sb"; test "$(cat "$d/sb")" = new; rm -rf "$d" "$src"'
+  [ "$status" -eq 0 ]
+}
+
+@test "vendor/sb.sh 原版和 Argo 补丁哈希与入口常量一致" {
+  raw_expected=$(grep 'SB_SHA256=' deploy_singbox.sh | cut -d'"' -f2)
+  patched_expected=$(grep 'SB_ARGO_PATCHED_SHA256=' deploy_singbox.sh | cut -d'"' -f2)
+  raw_actual=$(sha256sum vendor/sb.sh | awk '{print $1}')
+  tmp=$(mktemp)
+  cp vendor/sb.sh "$tmp"
+  sed -i 's/--protocol http2/--protocol auto/g' "$tmp"
+  patched_actual=$(sha256sum "$tmp" | awk '{print $1}')
+  rm -f "$tmp"
+  [ "$raw_actual" = "$raw_expected" ]
+  [ "$patched_actual" = "$patched_expected" ]
+}
+
 @test "lib/verify/time.sh loads" {
   run bash -c 'source lib/verify/time.sh; type verify_time >/dev/null && echo ok'
   [ "$output" = "ok" ]

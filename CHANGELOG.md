@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-09-23 — P0 修复：--force 实际没覆盖旧 sb.sh（用户重跑后 HY2/TUIC 仍不通）
+
+**用户实测**：GitHub 修复已推送，服务器执行 `deploy_singbox.sh --force` 并更新订阅后，HY2/TUIC 仍不通。
+
+**服务器证据**：
+
+- QQ/QQ2 的 `/usr/bin/sb` 哈希均为旧 Argo 补丁版 `dee59d47…`，补丁 marker 也等于该旧哈希。
+- QQ 虽已拉取 `VPNMAX_LIB_REV=2026-09-23.3`，但 sb 仍是旧版，说明 lib 更新了、冻结 vendor 没更新。
+- 实际订阅：HY2 有 `mport=40000-42000`，TUIC 没有 mport；恰好对应旧版“新 HY2 解析、缺 TUIC 补丁”的半更新状态。
+- iptables `VPNMAX_PORTHOP` 两条 DNAT 规则正确，sing-box 服务 active；不是防火墙或服务没起。
+
+**根因**：`lib/singbox.sh::install_singbox_yg()` 的 `--force` 只打印“强制重装”，随后仍进入“现有文件哈希复查”分支；旧 `/etc/s-box/.sb-argo-patched.sha256` 无条件信任历史补丁哈希，于是旧 sb 永远保留，新 vendor/sb.sh 根本没上线。
+
+**修复**：
+
+- 新增 `sb_needs_install()`：已有 sb 且 `FORCE=true` 时也必须进入安装分支。
+- 新增 `sb_hash_trusted()`：只信任当前 `SB_SHA256` 和当前 Argo 补丁版 `SB_ARGO_PATCHED_SHA256`；历史 marker 不再保活旧版。
+- 安装改为同目录暂存→校验→原子替换；安装失败时旧 sb 保持不变且明确失败，不再被“目标文件非空”冒充成功。
+- 增加 force、白名单、安装失败和原版/补丁版双哈希回归测试，防止以后改 vendor 忘记同步常量。
+- bump `VPNMAX_LIB_REV=2026-09-23.4`，强制线上重拉本轮 lib/vendor。
+
+**诚实说明**：上一提交 b820b3d 虽修正了 mport 解析，但因更新链没修，修复未真正进入 QQ/QQ2；不能据代码已 push 就声称用户侧已修好。
+
 ## 2026-09-23 — 修复：HY2/TUIC 订阅 mport 恒空，端口跳跃段不通
 
 **症状**：一键部署后订阅能生成、大部分节点（TCP 协议）能连，但 **Hysteria2 和 Tuic（UDP 协议）节点不通**。
