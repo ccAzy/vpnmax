@@ -1100,16 +1100,17 @@ else
 vmadd_argo=cloudflare-ech.com
 fi
 hy2_port=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[2].listen_port')
-# 修复：从 iptables 输出中提取 dpts 部分（端口跳跃范围），而非主端口
-# 原逻辑 grep -w "$hy2_port" | awk '{print $8}' 会取到 to:IP:PORT 而非 dpts:RANGE
-hy2_ports=$(iptables -t nat -nL --line 2>/dev/null | grep "dpts:.*to:$hy2_port" | grep -oE 'dpts:[0-9]+:[0-9]+' | sed 's/dpts://' || true)
+# 端口跳跃段：从 iptables-save（覆盖 VPNMAX_PORTHOP 自定义链）读指向 hy2 主端口的 UDP DNAT dports 段
+# 原逻辑 iptables -t nat -nL 只列内置链，读不到自定义链里的跳跃段 → mport 恒空（HY2/TUIC 不通根因）
+hy2_ports=$(iptables-save -t nat 2>/dev/null | grep -- "--to-destination :$hy2_port$" | grep -oE -- "--dports [0-9]+:[0-9]+" | grep -oE '[0-9]+:[0-9]+' | head -1 || true)
 if [[ -n $hy2_ports ]]; then
-  cmhy2pt=$(echo $hy2_ports | tr ':' '-')
+  cmhy2pt=$(echo "$hy2_ports" | tr ':' '-')
   hyps="&mport=$cmhy2pt"
   sbhy2pt=$(echo "$hy2_ports" | grep -oE '[0-9]+:[0-9]+' | sed 's/.*/"&"/' | paste -sd,)
 else
-  hyps=
-  sbhy2pt=
+  cmhy2pt=""
+  hyps=""
+  sbhy2pt=""
 fi
 ym=$(cat /root/ygkkkca/ca.log 2>/dev/null)
 hy2_sniname=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[2].tls.key_path')
@@ -1130,9 +1131,13 @@ ins_hy2=0
 hy2_ins=false
 fi
 tu5_port=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[3].listen_port')
-# TUIC 端口跳跃范围（固定 43000:45000，写入 mport 让客户端知道走跳跃段）
-tu5_ports="43000:45000"
-cmtu5pt=$(echo "$tu5_ports" | tr ':' '-')
+# TUIC 端口跳跃段：同样从 iptables-save 读指向 tu5 主端口的 UDP DNAT dports 段（覆盖 VPNMAX_PORTHOP）
+tu5_ports=$(iptables-save -t nat 2>/dev/null | grep -- "--to-destination :$tu5_port$" | grep -oE -- "--dports [0-9]+:[0-9]+" | grep -oE '[0-9]+:[0-9]+' | head -1 || true)
+if [[ -n $tu5_ports ]]; then
+  cmtu5pt=$(echo "$tu5_ports" | tr ':' '-')
+else
+  cmtu5pt=""
+fi
 ym=$(cat /root/ygkkkca/ca.log 2>/dev/null)
 tu5_sniname=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[3].tls.key_path')
 if [[ "$tu5_sniname" = '/etc/s-box/private.key' ]]; then
@@ -2782,8 +2787,8 @@ vm_port=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[1].listen_port')
 hy2_port=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[2].listen_port')
 tu5_port=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[3].listen_port')
 an_port=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '.inbounds[4].listen_port')
-hy2_ports=$(iptables -t nat -nL --line 2>/dev/null | grep "dpts:.*to:$hy2_port" | grep -oE 'dpts:[0-9]+:[0-9]+' | sed 's/dpts://' || true)
-tu5_ports="43000:45000"
+hy2_ports=$(iptables-save -t nat 2>/dev/null | grep -- "--to-destination :$hy2_port$" | grep -oE -- "--dports [0-9]+:[0-9]+" | grep -oE '[0-9]+:[0-9]+' | head -1 || true)
+tu5_ports=$(iptables-save -t nat 2>/dev/null | grep -- "--to-destination :$tu5_port$" | grep -oE -- "--dports [0-9]+:[0-9]+" | grep -oE '[0-9]+:[0-9]+' | head -1 || true)
 [[ -n $hy2_ports ]] && hy2zfport="$hy2_ports" || hy2zfport="未添加"
 [[ -n $tu5_ports ]] && tu5zfport="$tu5_ports" || tu5zfport="未添加"
 }

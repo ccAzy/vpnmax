@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-09-23 — 修复：HY2/TUIC 订阅 mport 恒空，端口跳跃段不通
+
+**症状**：一键部署后订阅能生成、大部分节点（TCP 协议）能连，但 **Hysteria2 和 Tuic（UDP 协议）节点不通**。
+
+**根因（两层）**：
+
+1. `vendor/sb.sh` 生成订阅时读跳跃段用的是 `iptables -t nat -nL`，该命令**只列内置链**
+   （PREROUTING/INPUT/OUTPUT/POSTROUTING），读不到 vpnmax 独立链 `VPNMAX_PORTHOP` 里的
+   跳跃段 DNAT 规则 → `hy2_ports` 恒空 → 订阅里 **mport 参数缺失** → 客户端只连主端口，
+   主端口被运营商 QoS/限速（如已知 40254 精准限速）→ 不通。
+2. **Tuic 完全没有 mport 处理逻辑**：Clash YAML 的 tuic 节点无 `ports` 字段，`tuic://` 链接无 `&mport=`，
+   客户端根本不知道有 43000:45000 跳跃段可用。
+
+**修法**（`vendor/sb.sh`）：
+
+- 跳跃段读取改用 `iptables-save -t nat`（**覆盖所有链**，含 `VPNMAX_PORTHOP`），按
+  `--to-destination :主端口` 精确定位指向该协议主端口的 UDP DNAT 规则，再提取 `--dports X:Y`。
+- HY2 主订阅区 + `allports()` 同步改成上述逻辑；读到才拼 `mport`/`ports`，读不到保持空（不误报）。
+- TUIC 主订阅区 + `allports()` 新增同样的跳跃段读取；`restu5` 的 `tuic://` 链接加 `&mport=`；
+  Clash YAML 的 tuic 节点补 `ports:` 字段（与 hy2 对称）。
+- 同步重算 `deploy_singbox.sh` 顶部 `SB_SHA256`（vendor/sb.sh 变更后必须同步，否则安装时 SHA 校验失败拒绝安装）。
+
+**验证**（模拟 `iptables-save` 输出离线验证）：HY2 主端口 33775 → 提取 `40000:42000`；
+Tuic 主端口 54321 → 提取 `43000:45000`；主端口为 `null`（无该 inbound）→ 空、不误匹配。3/3 通过。
+
+**边界**：若客户端（v2rayN/Karing）对应协议**不支持 mport 参数**，加了也无效，需客户端升级或改走 Argo 隧道。
+
 ## 2026-09-23 — 修复：lib 自举缓存冻结（lib 的修复到不了线上）
 
 **问题**：`vpnmax_bootstrap` 只补**缺失**的文件（`[ -s "$VPNMAX_LIB_HOME/$m.sh" ] && continue`），
