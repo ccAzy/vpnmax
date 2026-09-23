@@ -164,7 +164,7 @@ EOF
             exit 0
         fi
     else
-        warn "标记文件存在但内核未使用 BBRv3（可能已更新），重新执行优化"
+        warn "标记文件存在，但当前运行的内核不是 BBRv3 —— 多半是已装好还没重启；本次会确认内核并重启"
         if $DRY_RUN; then
             info "[dry-run] 删除失效优化标记: $MARK"
         else

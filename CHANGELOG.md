@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-09-23 — 一键脚本端到端实测发现的 3 个问题（GRUB 索引 / conntrack 失效 / 重跑白下）
+
+在 QQ/QQ2 两台新刷的 Ubuntu 22.04 上跑真·一键脚本（`curl … | bash`，不带参数）发现的：
+
+**P1 `ensure_grub_boot` 的 GRUB 索引算错（侬幸进对了，但会失效）**
+
+- 原实现用 `grep -oP "menuentry '\K[^']+"` 数菜单项 —— **只数 `menuentry`，不数 `submenu`**，
+  于是把 Advanced 子菜单里的条目当成顶层项来数，算出 `target=1`。
+- 真实 grub.cfg：`[0] menuentry 'Ubuntu'`、`[1] submenu 'Advanced options for Ubuntu'`，
+  BBRv3 实际在**子菜单第 0 项**。`GRUB_DEFAULT=1` 选中子菜单 → 子菜单默认项正好是 BBRv3 → 侬幸进对。
+- **失效场景**：以后装了更新的内核，子菜单第 0 项变成新内核 → 引导到错内核，BBRv3 白装。
+- 改为用 **「子菜单>条目」完整路径**（GRUB 手册语法）定位，不受索引漂移影响：
+  `GRUB_DEFAULT="Advanced options for Ubuntu>Ubuntu, with Linux 7.2.7-joeyblog-bbrv3-max"`
+
+**P2 conntrack 调优重启后失效，脚本却报「已应用」**
+
+- `apply_sysctl` 里 `modprobe nf_conntrack` 只在**当次运行**生效；没写 `/etc/modules-load.d/`，
+  重启后模块不加载 → `/proc/sys/net/netfilter/nf_conntrack_max` 不存在 → sysctl 那行开机静默失败，
+  上限回落到内核默认。而脚本无条件打印 `[+] …并应用（conntrack=130000）`。
+- 修：写 `/etc/modules-load.d/vpnmax-conntrack.conf`（systemd-sysctl 排在 modules-load 之后，
+  开机顺序是对的）+ **回读校验**，对不上就 warn 而不是报成功。
+
+**P3 重跑白下 141MB**
+
+- `install_bbrv3` 只判「**运行中**的内核」有没有 bbrv3，不判「包已装好、只差重启」→ 重跑会重下 141MB（实测约 3 分钟）。
+- 修：`/boot/vmlinuz-*bbrv3*` 已存在 → 直接提示「已安装，只差重启」并 `return 0`。
+- 顺带修掉误导提示：`标记文件存在但内核未使用 BBRv3（可能已更新）` → 说明真实原因是「已装好未重启」。
+
+**未改（已记录）**：ethtool 对不支持的参数会打 `netlink error`（功能有兜底，但看着像失败）。
+
 ## 2026-09-23 — 修复：慢速链路下内核下载必然失败（固定 --max-time + 无断点续传）
 
 **症状**：`deploy_optimize.sh` 卡在内核下载，反复报
