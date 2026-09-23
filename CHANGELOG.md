@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-09-23 — P0 修复：真实 iptables-save 输出是 `--dport`，mport 仍为空
+
+**QQ/QQ2 真机强制重跑证据**：新版 `sb.sh` 已上线（哈希 `b7a0d829…`、lib rev `2026-09-23.4`），但订阅仍是空的 `ports:`，HY2/TUIC 链接仍没有 `mport`。
+
+**根因**：离线测试误用了 `iptables-save` 的多端口输出 `--dports`；服务器真实规则来自 `--dport 40000:42000`（单数），所以 `grep -- "--dports"` 匹配不到。
+
+**修复**：
+
+- 4 处提取正则改为 `--dports?`，同时兼容单数 `--dport` 和复数 `--dports`。
+- 新增真实输出回归测试：`--dport 40000:42000` → `40000:42000`。
+- 修正端口跳跃日志把 `40000:42000` 打成 `4000042000` 的显示错误。
+- 同步重算原版/Argo 补丁版哈希，bump `VPNMAX_LIB_REV=2026-09-23.5`。
+
 ## 2026-09-23 — P0 修复：--force 实际没覆盖旧 sb.sh（用户重跑后 HY2/TUIC 仍不通）
 
 **用户实测**：GitHub 修复已推送，服务器执行 `deploy_singbox.sh --force` 并更新订阅后，HY2/TUIC 仍不通。

@@ -32,6 +32,11 @@
   [ "$status" -eq 0 ]
 }
 
+@test "真实 iptables-save 的单数 --dport 跳跃段能解析" {
+  run bash -c 'line="-A VPNMAX_PORTHOP -p udp -m udp --dport 40000:42000 -j DNAT --to-destination :27800"; got=$(printf "%s\\n" "$line" | grep -oE -- "--dports? [0-9]+:[0-9]+" | grep -oE "[0-9]+:[0-9]+" | head -1); test "$got" = 40000:42000'
+  [ "$status" -eq 0 ]
+}
+
 @test "vendor/sb.sh 原版和 Argo 补丁哈希与入口常量一致" {
   raw_expected=$(grep 'SB_SHA256=' deploy_singbox.sh | cut -d'"' -f2)
   patched_expected=$(grep 'SB_ARGO_PATCHED_SHA256=' deploy_singbox.sh | cut -d'"' -f2)

@@ -235,11 +235,11 @@ config_port_hopping() {
         run iptables -t nat -N "$CHAIN_PORTHOP" 2>/dev/null || true
         if [ -n "$HY_PORT" ] && [ "$HY_PORT" != "null" ]; then
             run iptables -t nat -A "$CHAIN_PORTHOP" -p udp --dport "$HOP_HY_RANGE" -j DNAT --to-destination :"$HY_PORT"
-            ok "Hysteria2 端口跳跃: ${HOP_HY_RANGE//:/} → $HY_PORT"
+            ok "Hysteria2 端口跳跃: ${HOP_HY_RANGE/:/-} → $HY_PORT"
         fi
         if [ -n "$TU_PORT" ] && [ "$TU_PORT" != "null" ]; then
             run iptables -t nat -A "$CHAIN_PORTHOP" -p udp --dport "$HOP_TU_RANGE" -j DNAT --to-destination :"$TU_PORT"
-            ok "Tuic5 端口跳跃: ${HOP_TU_RANGE//:/} → $TU_PORT"
+            ok "Tuic5 端口跳跃: ${HOP_TU_RANGE/:/-} → $TU_PORT"
         fi
         run iptables -t nat -A PREROUTING -j "$CHAIN_PORTHOP"
         if command -v ip6tables >/dev/null 2>&1; then
