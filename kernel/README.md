@@ -27,8 +27,10 @@ kernel/*.deb               # 编译出的 deb 包（只进 GitHub Release）
 kernel/build-configs/      # 生成的 .config
 kernel/publish-markers/    # 发布标记
 kernel/generated-configs/  # 回写基线用的中转目录
-kernel/SHA256SUMS
 ```
+
+> 注：`kernel/SHA256SUMS` 曾列在此处，但工作流从未实现生成/上传它（上游 byJoey 也没有）。
+> 2026-09-23 起部署侧把校验和降为「尽力而为」——有就比对、没有就跳过，不再需要这个文件。
 
 ## 构建策略
 

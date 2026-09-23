@@ -6,10 +6,11 @@
 # 幂等设计：已优化过的服务器再次运行会自动跳过，不会重复重启
 #
 # 相对旧版 ACVPN 的关键改进：
-#   1. 内核 SHA256 校验改为【强制】：SHA256SUMS 获取失败或找不到目标包 → 直接中止，
-#      不再降级为"仅警告后照装"。内核是最高权限组件，不允许无声降级。
+#   1. 内核校验和为【尽力而为】：上游提供 SHA256SUMS 就比对，没有/对不上只告警，
+#      绝不阻断安装。上游（byJoey → ccAzy fork → 本仓 release）都不产出校验和，
+#      故不把它当门禁——2026-09-23 拍板：默认信任上游，不为其维护哈希资产。
 #   2. 内核下载地址锁定到明确的 release tag（可配置 VERSION_PIN），
-#      不做"API 动态取最新"的不确定性拼接；未锁定版本则强制校验。
+#      不做"API 动态取最新"的不确定性拼接。
 #   3. 所有命令替换统一 || true 防 set -e 静默退出。
 #   4. 全程写部署清单 /var/log/vpnmax-optimize-manifest.log（来源/版本/校验值）。
 #   5. 支持 --dry-run 预览 + --no-reboot。
@@ -59,7 +60,7 @@ vpnmax deploy_optimize.sh — 服务器暴力优化（BBRv3 + 网络极限压榨
   --no-reboot            完成优化后不自动重启（手动 reboot 生效）
   --dry-run              只打印将执行的动作，不实际修改系统
   --force                已优化也重跑（覆盖安装，`bash <(curl ...) --force` 一键重跑）
-  VERSION_PIN=x.y.z      锁定 BBRv3 内核版本；缺省时取 release 最新并强制校验
+  VERSION_PIN=x.y.z      锁定 BBRv3 内核版本；缺省时取 release 最新
 HELP
         exit 0
         ;;
@@ -235,9 +236,10 @@ PUBLIC_IP=$(curl -fsSL --max-time 5 https://api.ipify.org 2>/dev/null) ||
 [ "$PUBLIC_IP" = "unknown" ] && warn "无法获取公网 IP，网络可能受限"
 
 # ── BBRv3 内核安装 ──
-# 关键安全点：SHA256 校验【强制】。下载地址优先：
+# 下载地址优先：
 #   1) 若 VERSION_PIN 指定 → 精确拼接该 tag 的下载 URL（无 API 不确定性）
-#   2) 否则 → API 取最新 max tag，并同样强制 SHA256 校验
+#   2) 否则 → API 取最新 max tag
+# 校验和：有就比对、没有就跳过（只告警，不阻断）
 # ── 网络优化（保持 ACVPN 的三级内存分级 + ethtool 尽力降级） ──
 # ── GRUB 默认内核校验（防重启后进旧内核） ──
 # ══════════ 主流程 ══════════

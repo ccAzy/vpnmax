@@ -13,7 +13,7 @@ description: >
 | ------ | ------ |
 | `SKILL.md` | 本文件 — 完整部署指南 |
 | `bootstrap.sh` | **部署前置** — 基础依赖安装与环境检查（不改防火墙/不重启） |
-| `deploy_optimize.sh` | **第1步** — BBRv3 强制校验 + TCP/UDP + ethtool + 动态 RPS/XPS/fq + 自动重启 |
+| `deploy_optimize.sh` | **第1步** — BBRv3 安装 + TCP/UDP + ethtool + 动态 RPS/XPS/fq + 自动重启 |
 | `deploy_singbox.sh` | **第2步** — sing-box 部署（独立防火墙链 + 订阅 + Argo + WARP） |
 | `cleanup.sh` | 独立清理脚本（只删 vpnmax 自己的防火墙链，自动备份） |
 | `verify.sh` | 部署后验证（进程/端口/BBR/fq/网卡/独立链/Argo/订阅/域名分流/调优缺口回归） |
@@ -25,7 +25,7 @@ description: >
 
 1. **独立防火墙链**：所有 vpnmax 规则收敛到 `VPNMAX_ANTIPROBE`（filter INPUT）+ `VPNMAX_PORTHOP`（nat PREROUTING）命名链，主链仅一条跳转（`-I INPUT 1 -j VPNMAX_ANTIPROBE`）。重跑/卸载只 `-F/-X` 自己的链，绝不用 `limit: above`/`#conn` 全局匹配删 INPUT 规则 → 保护 fail2ban/Docker 等第三方规则。
 2. **外部脚本锁定**：sb.sh 固定 commit `5001e76efc9e15eac1f8ff33a0b389172e331e1d` + SHA256 `65113dd45eba3bb377e71e89f01d77d84537757771802898acc6e60f36bf06be`，失败即中止。
-3. **内核强制校验**：SHA256SUMS 缺失/失败 → 中止，不降级照装。⚠️ **已知缺口（2026-09-23 实测）**：整条链（`byJoey/Actions-bbr-v3` → `ccAzy` fork → `ccAzy/vpnmax` 自己的 release）**都不产出 `SHA256SUMS`**，所以这道门禁目前**必然中止**——内核装不上；但 `install_bbrv3` 失败**不中断**后续步骤（sysctl/ethtool/fq/RPS 照常生效，只是不写成功标记、不重启）。详见「第 1 步」小节的说明。
+3. **内核校验和＝尽力而为（不阻断）**：上游 release 提供 `SHA256SUMS` 就比对，**没有或对不上只告警**，不影响安装。上游（`byJoey/Actions-bbr-v3` → `ccAzy` fork → 本仓 release）都不产出校验和，所以不把它当门禁——2026-09-23 拍板：默认信任上游，不为其维护哈希资产。
 4. **核心/可选失败语义**：`install_singbox_yg`/`setup_subscription`/`start_argo` 失败记入 `DEPLOY_OK=false`，未完全成功不写 `/etc/.vpnmax-singbox`。
 5. **精确进程清理**：busybox 按监听端口定位 PID 停止，不 `pkill -x busybox` 杀全局。
 6. **默认不启用防火墙**：`VMESS_LOCK` 默认 `off`（明文 VMess 端口公网直连，适合密钥登录+关闭密码登录、无多余暴露面的节点全通场景）。需要防主动探测时设 `VMESS_LOCK=on`（明文 VMess 公网 DROP，仅 Argo 回环可达）。
@@ -56,7 +56,7 @@ bash bootstrap.sh --dry-run
 > `apt-get update && apt-get install -y curl`
 > 跳过部署前置也可以：两个部署脚本会各自兜底安装依赖。
 
-### 第 1 步：暴力优化 + BBRv3（强制校验） + 重启
+### 第 1 步：暴力优化 + BBRv3 + 重启
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_optimize.sh)
@@ -65,7 +65,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_opt
 自动完成：
 
 1. 清理旧 sing-box 残留（保留已部署的 /etc/s-box）
-2. 安装 BBRv3 内核（**SHA256 强制校验**，缺失/失败即中止）
+2. 安装 BBRv3 内核（校验和尽力而为：上游有就比对，缺失只告警）
 3. 应用网络优化（TCP/UDP 缓冲、BBR/fq、所有 RX/TX 队列的 RPS/XPS、ethtool，按内存分级防 OOM）
 4. 提升系统资源限制（nofile/nproc）
 5. 校验 GRUB 默认引导新内核
@@ -77,21 +77,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_opt
 > - `--dry-run` 预览不执行
 > - `VERSION_PIN=x.y.z` 锁定 BBRv3 版本
 >
-> ⚠️ **BBRv3 目前装不上（已知缺口，待修）**
->
-> 脚本要求 release 里必须有 `SHA256SUMS`，但**上游与自建 CI 都只发 `linux-*.deb` + `.config`，从不生成校验和**
-> （2026-09-23 实测：`byJoey/Actions-bbr-v3`、`ccAzy/Actions-bbr-v3`、`ccAzy/vpnmax` 三个仓库的
-> `x86_64-7.2.5/6/7-max`、`arm64-7.2.7-max` 全部 `SHA256SUMS` → **404**）。
->
-> 所以这一步会报 `SHA256SUMS 无法获取 —— 为安全起见中止安装`，然后**跳过内核、继续跑完网络优化**。
-> **不影响第 2 步的 sing-box 部署**，只是内核仍是发行版内核（BBRv1）。
->
-> 临时手动装（放弃来源校验，只能确认下载完整）：
->
-> ```bash
-> curl -fL -o /tmp/bbrv3.deb https://github.com/ccAzy/vpnmax/releases/download/x86_64-7.2.7-max/linux-image-7.2.7-joeyblog-bbrv3-max_7.2.7-1_amd64.deb
-> sha256sum /tmp/bbrv3.deb && dpkg -i /tmp/bbrv3.deb && update-grub && reboot
-> ```
+> 校验和策略：上游 release 有 `SHA256SUMS` 就比对，**没有就跳过（只告警）**，不阻断安装。
 
 ### 第 2 步：部署 sing-box（重启后）
 
