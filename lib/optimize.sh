@@ -307,8 +307,8 @@ if [ "$rx_count" -gt 0 ]; then
 fi
 echo "[vpnmax-net-tuning] applied iface=$iface cores=$cores rx_queues=$rx_count mask=$cpu_mask"
 TUNE
-chmod +x /usr/local/sbin/vpnmax-net-tuning.sh
-atomic_write  /etc/systemd/system/vpnmax-net-tuning.service <<'UNIT'
+    chmod +x /usr/local/sbin/vpnmax-net-tuning.sh
+    atomic_write /etc/systemd/system/vpnmax-net-tuning.service <<'UNIT'
 [Unit]
 Description=vpnmax persistent network tuning
 After=network-online.target
