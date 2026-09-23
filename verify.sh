@@ -14,15 +14,26 @@ set -euo pipefail
 VPNMAX_SCRIPT_DIR="${VPNMAX_SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)}"
 # shellcheck disable=SC2034 # lib/*.sh 经 SCRIPT_DIR 定位仓库内 vendor/
 SCRIPT_DIR="$VPNMAX_SCRIPT_DIR"
-. "$VPNMAX_SCRIPT_DIR/lib/boot.sh" 2>/dev/null || . "${VPNMAX_LIB_HOME:-/usr/local/lib/vpnmax}/boot.sh" 2>/dev/null || {
-    VPNMAX_LIB_HOME="${VPNMAX_LIB_HOME:-/usr/local/lib/vpnmax}"
-    mkdir -p "$VPNMAX_LIB_HOME" || true
-    curl -fsSL "${VPNMAX_RAW:-https://raw.githubusercontent.com/ccAzy/vpnmax/main}/lib/boot.sh" -o "$VPNMAX_LIB_HOME/boot.sh" || {
+# 仓库模式：直接用本地 lib/（开发 / 已 clone）
+# 单文件模式：**每次都取最新 boot.sh**（只有几 KB）——再由它按版本戳决定要不要重拉模块。
+#   旧写法只在 boot.sh 缺失时才下载 → 缓存一旦落地就冻结，lib 修复永远到不了线上（09-23 连踩两次）。
+VPNMAX_LIB_HOME="${VPNMAX_LIB_HOME:-/usr/local/lib/vpnmax}"
+if [ -r "$VPNMAX_SCRIPT_DIR/lib/boot.sh" ]; then
+    . "$VPNMAX_SCRIPT_DIR/lib/boot.sh"
+else
+    mkdir -p "$VPNMAX_LIB_HOME" 2>/dev/null || true
+    _boot_new="$VPNMAX_LIB_HOME/boot.sh.$$"
+    if curl -fsSL --connect-timeout 5 --max-time 20 \
+        "${VPNMAX_RAW:-https://raw.githubusercontent.com/ccAzy/vpnmax/main}/lib/boot.sh" -o "$_boot_new" 2>/dev/null && [ -s "$_boot_new" ]; then
+        mv -f "$_boot_new" "$VPNMAX_LIB_HOME/boot.sh"
+    else
+        rm -f "$_boot_new" 2>/dev/null || true
+    fi
+    . "$VPNMAX_LIB_HOME/boot.sh" 2>/dev/null || {
         printf '[x] vpnmax: 无法获取引导脚本（检查网络，或改用 git clone 后运行）\n' >&2
         exit 1
     }
-    . "$VPNMAX_LIB_HOME/boot.sh"
-}
+fi
 vpnmax_load "$VPNMAX_MODULES_ALL $VPNMAX_MODULES_VERIFY" || {
     printf '[✗] vpnmax: 无法加载 lib（网络或仓库不可达）\n' >&2
     exit 1

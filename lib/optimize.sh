@@ -39,7 +39,10 @@ install_bbrv3() {
     # 已装好、只差重启：直接跳过下载。否则会白下 141MB（2026-09-23 实测约 3 分钟）。
     local _installed_kernel="" _k
     for _k in /boot/vmlinuz-*bbrv3*; do
-        [ -e "$_k" ] && { _installed_kernel="$_k"; break; }
+        [ -e "$_k" ] && {
+            _installed_kernel="$_k"
+            break
+        }
     done
     if [ -n "$_installed_kernel" ]; then
         ok "BBRv3 内核已安装（$_installed_kernel），只差重启生效 —— 跳过下载"

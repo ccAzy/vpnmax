@@ -28,6 +28,10 @@ VPNMAX_MODULES_VERIFY="verify/time verify/tuic"
 # vendor/ 里随部署落盘的冻结件（单文件模式下也能命中"vendor 优先、零上游"）
 VPNMAX_VENDOR_FILES="sb.sh"
 
+# lib 版本戳：**每次改动 lib/ 就把它改掉**。服务器靠它判断要不要重拉已缓存的模块——
+# 旧逻辑只补缺失文件，缓存一旦落地就冻结，lib 的修复永远到不了线上（2026-09-23 连踩两次）。
+VPNMAX_LIB_REV="2026-09-23.1"
+
 # 打印可用的 lib 源目录（以 common.sh 为存在标志）
 vpnmax_lib_src() {
     local d
@@ -88,12 +92,33 @@ vpnmax_bootstrap() {
     done
     printf '    [%d/%d] 已就绪
 ' "$total" "$total" >&2
+    printf '%s\n' "${VPNMAX_LIB_REV:-}" >"$VPNMAX_LIB_HOME/.lib-rev" 2>/dev/null || true
+    return 0
+}
+
+# 版本戳不一致 → 丢弃缓存的 lib/vendor 并整体重拉。
+# 只在用缓存（$VPNMAX_LIB_HOME）时才有意义；仓库模式（有本地 lib/）由 vpnmax_load 跳过。
+vpnmax_refresh_if_stale() {
+    local rev_file="$VPNMAX_LIB_HOME/.lib-rev" m v
+    [ -n "${VPNMAX_LIB_REV:-}" ] || return 0
+    if [ -s "$rev_file" ] && [ "$(cat "$rev_file" 2>/dev/null || true)" = "$VPNMAX_LIB_REV" ]; then
+        return 0
+    fi
+    printf '[*] lib 版本变化（%s → %s）：重新取回 lib/ 与 vendor/\n' \
+        "$(cat "$rev_file" 2>/dev/null || echo 无)" "$VPNMAX_LIB_REV" >&2
+    for m in $VPNMAX_MODULES_ALL $VPNMAX_MODULES_VERIFY; do rm -f "$VPNMAX_LIB_HOME/$m.sh" 2>/dev/null || true; done
+    for v in $VPNMAX_VENDOR_FILES; do rm -f "$VPNMAX_LIB_HOME/vendor/$v" 2>/dev/null || true; done
+    vpnmax_bootstrap || return 1
     return 0
 }
 
 # 加载模块；失败返回 1（调用方必须 fail-loud 退出，绝不带着缺函数的脚本继续跑）
 vpnmax_load() {
     local want="${1:-$VPNMAX_MODULES_ALL}" src m f
+    # 仓库模式（有本地 lib/common.sh）直接用，不碰缓存也不校验版本戳
+    if [ ! -r "${VPNMAX_SCRIPT_DIR:-}/lib/common.sh" ] && [ ! -r "./lib/common.sh" ]; then
+        vpnmax_refresh_if_stale || return 1
+    fi
     if ! src="$(vpnmax_lib_src)"; then
         vpnmax_bootstrap || return 1
         src="$VPNMAX_LIB_HOME"

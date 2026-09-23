@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-09-23 — 修复：lib 自举缓存冻结（lib 的修复到不了线上）
+
+**问题**：`vpnmax_bootstrap` 只补**缺失**的文件（`[ -s "$VPNMAX_LIB_HOME/$m.sh" ] && continue`），
+入口脚本每次从 raw 取最新，但真正执行的 `install_bbrv3` 等来自 `/usr/local/lib/vpnmax/` 的**旧缓存**
+→ **lib 的修复永远到不了线上**。当天连踩两次：改了三轮下载逻辑，服务器上跑的还是 13:37 那份
+（`grep -c -- '-C -'` = 0，`max-time 120` = 1）。
+
+**修法**
+
+- `lib/boot.sh` 加 `VPNMAX_LIB_REV` 版本戳 + `vpnmax_refresh_if_stale()`：戳不一致就丢掉缓存的
+  lib/vendor 并整体重拉；`vpnmax_bootstrap` 成功后写戳（`$VPNMAX_LIB_HOME/.lib-rev`）。
+- 5 个入口脚本（bootstrap / deploy_optimize / deploy_singbox / verify / cleanup）：单文件模式下
+  **每次都取最新 `boot.sh`**（只有几 KB），再由它按戳决定要不要重拉模块。
+- 仓库模式（有本地 `lib/`）完全不碰缓存、不校验戳。
+
+**验证**（用 `file://` 指向本地仓库模拟服务器缓存）：旧戳 → 检测到版本变化、重拉 12 个文件、
+戳更新为 `2026-09-23.1`；戳一致 → 静默跳过；手动把戳改旧 → 再次重拉（证明戳是判据）。
+
+> ⚠️ **以后每次改 `lib/` 必须同步改 `VPNMAX_LIB_REV`**，否则线上不会更新。
+> vpnplus 无此问题（它只读 `/usr/local/lib/vpnplus`、从不写入，用的是内联副本）。
+
 ## 2026-09-23 — 一键脚本端到端实测发现的 3 个问题（GRUB 索引 / conntrack 失效 / 重跑白下）
 
 在 QQ/QQ2 两台新刷的 Ubuntu 22.04 上跑真·一键脚本（`curl … | bash`，不带参数）发现的：
