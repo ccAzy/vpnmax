@@ -3,10 +3,10 @@
 # ===================================================================
 # vpnmax — 环境准备与依赖检查
 # 用法:
-  bash bootstrap.sh [选项]        # 仓库模式 / 已下载
-  bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/bootstrap.sh) [选项]   # 一键
-
-参数: bash bootstrap.sh [--dry-run] [--check-only]
+#   bash bootstrap.sh [选项]        # 仓库模式 / 已下载
+#   bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/bootstrap.sh) [选项]   # 一键
+#
+# 参数: bash bootstrap.sh [--dry-run] [--check-only]
 #
 # 只负责准备 Debian/Ubuntu VPS 的基础工具，不安装内核、不部署 sing-box、
 # 不修改防火墙、不重启机器。

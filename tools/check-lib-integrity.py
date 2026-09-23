@@ -12,6 +12,7 @@
   R3 入口脚本不得重复定义 lib 中 readonly 的常量（重跑会 runtime 报 readonly variable）
   R4 所有 shell 文件 bash -n 通过
   R5 lib 每个模块必须有重复-source 守卫
+  R6 头部注释区不得夹带未注释行（漏写 # 会把用法文本当命令执行）
 
 用法: python3 tools/check-lib-integrity.py
 退出码: 0 通过 / 1 有违规
@@ -76,6 +77,32 @@ for p in sorted((ROOT / "lib").rglob("*.sh")):
     if not re.search(r"^VPNMAX_[A-Z_]*LOADED=", p.read_text(encoding="utf-8"), re.M):
         violations.append(f"R5 {p.relative_to(ROOT)} 缺少重复-source 守卫（VPNMAX_*_LOADED）")
 
+# ── R6 头部注释区不得夹带未注释行 ──
+# 背景（2026-09-23 线上事故）：bootstrap.sh / deploy_optimize.sh 的头部用法注释块里
+# 「  bash bootstrap.sh [选项]」三行漏写 `#`，bash -n 与 shellcheck 都不报错（语法完全合法），
+# 但运行时会被当真命令执行：先报 `bash: bootstrap.sh: No such file or directory`，
+# 再因第二行 `bash <(curl .../bootstrap.sh)` 递归自举 → 无限循环刷屏。
+# 规则：从第 2 行起，遇到第一个「明确的语句行」之前，非空行必须都是注释。
+STMT = re.compile(
+    r"^\s*(?:"
+    r"set\s|set$|\.\s|source\s|umask\b|export\s|declare\s|readonly\s|local\s|trap\s|"
+    r"[A-Za-z_][A-Za-z0-9_]*=|"
+    r"\[\[?\s|\(|"
+    r"if\s|for\s|while\s|until\s|case\s|function\s|"
+    r"[a-z_][a-z0-9_]*\s*\(\)"
+    r")"
+)
+for p in shells:
+    rel = p.relative_to(ROOT)
+    for i, ln in enumerate(read(rel).split("\n")[1:60], start=2):
+        if not ln.strip() or ln.lstrip().startswith("#"):
+            continue
+        if STMT.match(ln):
+            break
+        violations.append(
+            f"R6 {rel}:{i} 头部注释区出现未注释行（会被当作命令执行，补 `# `）: {ln.strip()[:70]}"
+        )
+
 # ── 报告（不判失败）：入口脚本里出现、但 lib/本文件都没有定义的标识符 ──
 defined = set()
 for src in list((ROOT / "lib").rglob("*.sh")):
@@ -95,7 +122,7 @@ for e in ENTRIES:
                 continue
             notes.append(f"  {e}:{i+1} {n}")
 
-print(f"✓ R1-R5 全部通过：{len(shells)} 个 shell 文件，{len(ENTRIES)} 个入口脚本")
+print(f"✓ R1-R6 全部通过：{len(shells)} 个 shell 文件，{len(ENTRIES)} 个入口脚本")
 if notes:
     print(f"\n参考（可能的外部命令调用，未判失败，{len(notes)} 项）：")
     print("\n".join(notes[:15]))

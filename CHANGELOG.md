@@ -1,5 +1,47 @@
 # Changelog
 
+## 2026-09-23 — P0 修复：一键安装脚本头部注释漏写 `#`（线上无限刷屏事故）
+
+**症状**：在 VPS 上粘贴
+`bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/bootstrap.sh)`
+后，终端**不停刷** `bash: bootstrap.sh: No such file or directory`，且不会自己停。
+
+**根因**：`bootstrap.sh` / `deploy_optimize.sh` 的头部「用法」注释块里有 3 行漏写了 `#`：
+
+```
+# 用法:
+  bash bootstrap.sh [选项]        # 仓库模式 / 已下载        ← 漏 #
+  bash <(curl -fsSL .../bootstrap.sh) [选项]   # 一键          ← 漏 #
+
+参数: bash bootstrap.sh [--dry-run] [--check-only]            ← 漏 #
+```
+
+于是 bash 把它们当真命令执行：
+
+1. `bash bootstrap.sh [选项]` → 当前目录没有该文件 → 报
+   `bash: bootstrap.sh: No such file or directory`（用户看到的第一行）；
+2. `bash <(curl .../bootstrap.sh) [选项]` → **把脚本自己下载下来再跑一遍** → 递归，
+   每层都重演 1、2 → 无限刷屏；
+3. `参数: bash ...` → `command not found`。
+
+因为第 2 行是同步调用，父进程永远卡在这一行，**后面的代码一行都没执行** ——
+所以只有刷屏，没有对系统做任何修改（root 检查、apt、gai.conf 全在更后面）。
+
+**为什么 CI 没拦住**：这几行语法完全合法，`bash -n` 通过，shellcheck 也不报。
+纯静态检查看不出「这行本来是注释」。引入于 a7d3f08（UX/--help 补齐那笔，重写头部时丢了 `#`）。
+
+**修复**
+
+- 给 `bootstrap.sh`（3 行）、`deploy_optimize.sh`（3 行）补回 `#`。
+- 门禁新增 **R6**：shell 文件「头部注释区」内出现未注释行即失败
+  （`tools/check-lib-integrity.py`，已接进 CI test job）。
+- 回归测试：`tests/test_lib.bats` 新增「入口脚本 --help 不执行游离命令」——
+  用 `timeout 20 bash <entry> --help` 断言 exit 0 且输出无 `No such file` / `command not found`。
+  带超时，正好能逮住这类死循环：**静态检查逮不住的，跑一下就能逮住**。
+
+**影响面**：`bootstrap.sh`、`deploy_optimize.sh` 两个入口的一键安装路径 100% 不可用；
+`deploy_singbox.sh` / `cleanup.sh` 的同类用法文本在 `<<'HELP'` heredoc 内，不受影响（已确认）。
+
 ## 2026-09-12 — 砍掉「测速优选」方向（保留部署 / 保活 / 验证）
 
 **决定依据（用户的判断，我原本方向错了）**：完整链路是

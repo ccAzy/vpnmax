@@ -15,10 +15,10 @@
 #   5. 支持 --dry-run 预览 + --no-reboot。
 #
 # 用法:
-  bash deploy_optimize.sh [选项]        # 仓库模式 / 已下载
-  bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_optimize.sh) [选项]   # 一键
-
-参数: bash deploy_optimize.sh [--no-reboot] [--dry-run] [VERSION_PIN=x.y.z]
+#   bash deploy_optimize.sh [选项]        # 仓库模式 / 已下载
+#   bash <(curl -fsSL https://raw.githubusercontent.com/ccAzy/vpnmax/main/deploy_optimize.sh) [选项]   # 一键
+#
+# 参数: bash deploy_optimize.sh [--no-reboot] [--dry-run] [VERSION_PIN=x.y.z]
 # 强制重跑: rm -f /etc/.vpnmax-optimized && bash deploy_optimize.sh
 # ===================================================================
 set -euo pipefail
