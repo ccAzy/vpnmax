@@ -61,10 +61,7 @@ install_bbrv3() {
     }
 
     info "下载 BBRv3... ($(basename "$DOWNLOAD_URL"))"
-    if ! run curl -fL# -H "$UA" --retry 3 --retry-delay 2 --retry-connrefused --connect-timeout 15 --max-time 120 -o /tmp/bbrv3.deb "$DOWNLOAD_URL" || [ ! -s /tmp/bbrv3.deb ]; then
-        fail "BBRv3 下载失败"
-        return 1
-    fi
+    vpnmax_download "$DOWNLOAD_URL" /tmp/bbrv3.deb || return 1
 
     # ── 校验和：尽力而为，绝不阻断 ──
     # 上游（byJoey/Actions-bbr-v3 → ccAzy fork → 本仓 release）都不产出 SHA256SUMS。

@@ -60,6 +60,46 @@ run_ok() {
     "$@" 2>/dev/null || true
 }
 
+# 断点续传下载：慢速链路下固定 --max-time 必然失败——141MB 的内核 deb 在 0.84MB/s 上需 161s，
+# 而原来给的是 --max-time 120（2026-09-23 线上实测卡死）；且不带 -C - 的 --retry 会把已下载的
+# 字节全部丢弃重下（curl 日志里的 "Throwing away N bytes"）。改为：
+#   ① -C - 断点续传，进度跨重试累积；② --speed-limit/--speed-time 做「停滞判定」——
+#   只在下行持续低于 10KB/s 达 60s 时才放弃，不按总时长砍；③ 用 Content-Length 校验完整性。
+# 用法: vpnmax_download <url> <输出文件>
+# shellcheck disable=SC2086 # -H "$UA" 允许 UA 未设置时用默认值
+vpnmax_download() {
+    local url="$1" out="$2" want="" sz=0 i=0
+    if ${DRY_RUN:-false}; then
+        info "[dry-run] 下载 $url → $out"
+        return 0
+    fi
+    want=$(curl -fsSLI -H "${UA:-User-Agent: vpnmax}" --connect-timeout 15 --max-time 30 "$url" 2>/dev/null |
+        awk 'tolower($0) ~ /^content-length:/ {gsub(/[^0-9]/, "", $2); print $2}' | tail -1 || true)
+    while [ "$i" -lt 20 ]; do
+        i=$((i + 1))
+        if curl -fL# -H "${UA:-User-Agent: vpnmax}" -C - --retry 2 --retry-delay 3 --connect-timeout 15 \
+            --speed-limit 10240 --speed-time 60 -o "$out" "$url"; then
+            break
+        fi
+        sz=$(stat -c%s "$out" 2>/dev/null || echo 0)
+        if [ -n "$want" ] && [ "$sz" = "$want" ]; then break; fi # 服务端对已完整文件回 416
+        warn "下载中断（已得 ${sz}B${want:+ / ${want}B}），续传重试 ${i}/20…"
+        sleep 3
+    done
+    sz=$(stat -c%s "$out" 2>/dev/null || echo 0)
+    if [ -z "$want" ]; then
+        warn "远端未返回 Content-Length，无法校验完整性（已下载 ${sz}B）"
+        if [ "$sz" -gt 0 ]; then return 0; fi
+        return 1
+    fi
+    if [ "$sz" != "$want" ]; then
+        fail "下载不完整：${sz}B / ${want}B"
+        return 1
+    fi
+    ok "下载完成：${sz}B（与远端 Content-Length 一致）"
+    return 0
+}
+
 # 原子写入：先写同目录临时文件，内容非空才 mv 覆盖。
 # 为什么需要：sb.json / iptables rules.v4 / systemd drop-in 这类文件写到一半被中断
 # 就是「配置残缺」——轻则服务起不来，重则节点失联。同文件系统内 mv 是原子的。
