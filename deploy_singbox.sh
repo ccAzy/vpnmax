@@ -183,6 +183,7 @@ EOF
             "${VPNMAX_LIB_REV:-?}" "${SB_SHA256:0:12}"
     }
     logo
+    vpnmax_lock system   # 与其他 vpnmax 实例互斥（deploy/cleanup 共用一把锁）
     if $DRY_RUN; then echo -e "${YELLOW}═══ DRY-RUN 模式：仅预览，不修改系统 ═══${N}"; fi
     # 品牌切割：先接管旧 vpnplus 资产（units/keepalive/cron/marker），再走新流程
     if declare -F migrate_legacy_units >/dev/null 2>&1; then migrate_legacy_units || true; fi
@@ -190,6 +191,8 @@ EOF
     # 失败 trap：半成品状态下明确给出恢复指引，而不是带着半配置退出
     trap_interrupt() {
         local rc=$?
+        # 本脚本的 EXIT trap 会覆盖 vpnmax_lock 里装的那个，锁要在这里一并释放
+        rm -f "${VPNMAX_LOCK_FILE:-}" 2>/dev/null || true
         # 正常完成/主动 skip（rc 0）不算中断，避免 "退出码 0" 误报
         [ "$rc" -eq 0 ] && return 0
         echo ""
@@ -210,6 +213,7 @@ EOF
     if [ "$FORCE" != "true" ] && [ "${RESET_SUB:-0}" != "1" ] && [ "${VMESS_LOCK:-off}" != "on" ] &&
         [ -f /etc/s-box/sb.json ] && { systemctl is-active sb >/dev/null 2>&1 || systemctl is-active sing-box >/dev/null 2>&1 || systemctl is-active xr >/dev/null 2>&1; }; then
         # 已部署跳过≠失败，撤销 EXIT trap 避免误报“部署中断（退出码 0）”
+        rm -f "${VPNMAX_LOCK_FILE:-}" 2>/dev/null || true
         trap - EXIT
         ok "sing-box 已部署运行中，跳过安装。"
         info "如需强制重跑并对齐 sb.json/iptables/订阅三处："

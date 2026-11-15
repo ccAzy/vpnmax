@@ -369,6 +369,7 @@ verify_clean() {
 #   ② 末尾再清一遍——实测 rm_units 删 vpnmax-netfilter-restore.service 时 systemd
 #      daemon-reload 会触发该 unit 的一次执行，把 VPNMAX_* 链又装回来
 #      （日志：链已清理 → 删 unit → 验证发现链仍在）。链清理是幂等的，跑两遍无害。
+vpnmax_lock system   # 与 deploy/optimize 互斥：部署跑到一半被清理最危险
 bak_firewall
 clean_chains   # ① 先清一遍
 stop_services

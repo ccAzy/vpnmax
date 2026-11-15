@@ -61,6 +61,38 @@ step_elapsed() {
     return 0
 }
 
+# 进程互斥：同一时间只允许一个 vpnmax 实例改动系统状态。
+# 实测两个 deploy 并发时「两个都报成功」，但后完成那个会把订阅重新生成一遍，
+# 先完成者交给用户的链接当场变旧值；deploy 与 cleanup 并发更糟（清到一半被装回）。
+#
+# 为什么用 pidfile 而不是 flock：本脚本会起常驻子进程（cloudflared / busybox httpd），
+# 它们会**继承 flock 的文件描述符**并一直持有，于是那次部署结束后锁永远不释放，
+# 之后每次运行都被自己拒掉（实测踩到）。pidfile + kill -0 没有继承问题，
+# 且进程被杀后残留的陈旧 pidfile 能自愈。
+vpnmax_lock() {
+    # 必须分两条 local：同一条里 bash 会在执行赋值前就展开所有词，
+    # 于是 ${name} 还是旧值（空），锁文件会变成 vpnmax-.pid（SC2318）
+    local name="${1:-system}"
+    local lockfile="/var/lock/vpnmax-${name}.pid" old
+    mkdir -p /var/lock 2>/dev/null || true
+    if [ -f "$lockfile" ]; then
+        old=$(tr -cd '0-9' <"$lockfile" 2>/dev/null || true)
+        if [ -n "$old" ] && [ "$old" != "$$" ] && kill -0 "$old" 2>/dev/null; then
+            fail "另一个 vpnmax 实例正在运行（PID $old，锁：$lockfile）"
+            info "等它跑完再执行；若确认该进程已不存在，重跑会自动接管"
+            exit 1
+        fi
+        rm -f "$lockfile" 2>/dev/null || true   # 陈旧锁，接管
+    fi
+    printf '%s
+' "$$" >"$lockfile" 2>/dev/null || true
+    VPNMAX_LOCK_FILE="$lockfile"   # 全局：EXIT trap 触发时局部变量早已出栈
+    # trap 里必须用全局变量：$lockfile 是 local，函数返回后即消失，
+    # 退出时 trap 引用它会报 "lockfile: unbound variable"（set -u），锁文件删不掉。
+    trap 'rm -f "${VPNMAX_LOCK_FILE:-}" 2>/dev/null || true' EXIT INT TERM
+    return 0
+}
+
 # 收尾汇总：几百行输出里的 [!] 会被忽略，这里重列一遍，并区分
 # 「核心警告」（要处理）与「可选组件未就绪」（不影响能上网）。
 summary_warnings() {
