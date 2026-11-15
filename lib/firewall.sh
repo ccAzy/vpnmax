@@ -324,32 +324,32 @@ fi
 if ! declare -F clean_chains >/dev/null 2>&1; then
     clean_chains() {
         echo "--- 清理 vpnmax 独立防火墙链 ---"
-        run iptables -D INPUT -j "$CHAIN_ANTIPROBE" 2>/dev/null
-        run iptables -D INPUT -j "$CHAIN_RSS" 2>/dev/null
-        run iptables -t nat -D PREROUTING -j "$CHAIN_PORTHOP" 2>/dev/null
+        run_ok iptables -D INPUT -j "$CHAIN_ANTIPROBE" 2>/dev/null
+        run_ok iptables -D INPUT -j "$CHAIN_RSS" 2>/dev/null
+        run_ok iptables -t nat -D PREROUTING -j "$CHAIN_PORTHOP" 2>/dev/null
         if command -v ip6tables >/dev/null 2>&1; then
-            run ip6tables -D INPUT -j "$CHAIN_ANTIPROBE" 2>/dev/null
-            run ip6tables -t nat -D PREROUTING -j "$CHAIN_PORTHOP" 2>/dev/null
+            run_ok ip6tables -D INPUT -j "$CHAIN_ANTIPROBE" 2>/dev/null
+            run_ok ip6tables -t nat -D PREROUTING -j "$CHAIN_PORTHOP" 2>/dev/null
         fi
-        run iptables -F "$CHAIN_ANTIPROBE" 2>/dev/null
-        run iptables -X "$CHAIN_ANTIPROBE" 2>/dev/null
-        run iptables -F "$CHAIN_RSS" 2>/dev/null
-        run iptables -X "$CHAIN_RSS" 2>/dev/null
-        run iptables -t nat -F "$CHAIN_PORTHOP" 2>/dev/null
-        run iptables -t nat -X "$CHAIN_PORTHOP" 2>/dev/null
+        run_ok iptables -F "$CHAIN_ANTIPROBE" 2>/dev/null
+        run_ok iptables -X "$CHAIN_ANTIPROBE" 2>/dev/null
+        run_ok iptables -F "$CHAIN_RSS" 2>/dev/null
+        run_ok iptables -X "$CHAIN_RSS" 2>/dev/null
+        run_ok iptables -t nat -F "$CHAIN_PORTHOP" 2>/dev/null
+        run_ok iptables -t nat -X "$CHAIN_PORTHOP" 2>/dev/null
         if command -v ip6tables >/dev/null 2>&1; then
-            run ip6tables -F "$CHAIN_ANTIPROBE" 2>/dev/null
-            run ip6tables -X "$CHAIN_ANTIPROBE" 2>/dev/null
-            run ip6tables -t nat -F "$CHAIN_PORTHOP" 2>/dev/null
-            run ip6tables -t nat -X "$CHAIN_PORTHOP" 2>/dev/null
+            run_ok ip6tables -F "$CHAIN_ANTIPROBE" 2>/dev/null
+            run_ok ip6tables -X "$CHAIN_ANTIPROBE" 2>/dev/null
+            run_ok ip6tables -t nat -F "$CHAIN_PORTHOP" 2>/dev/null
+            run_ok ip6tables -t nat -X "$CHAIN_PORTHOP" 2>/dev/null
         fi
         command -v iptables >/dev/null 2>&1 && {
             iptables -t nat -L PREROUTING --line-numbers -n 2>/dev/null |
                 grep -E '(DNAT|REDIRECT).*dpts:(40000:42000|43000:45000|40000:41000|43000:44000) ' |
                 awk '{print $1}' | sort -rn | while read -r num; do
-                run iptables -t nat -D PREROUTING "$num"
+                run_ok iptables -t nat -D PREROUTING "$num"
             done
-        }
+        } || true   # grep 无匹配返回 1，pipefail+set -e 会直接杀掉脚本（干净系统上必现）
         # v6 对称清理：同条件镜像删 ip6tables PREROUTING 残留（无 ip6tables 时跳过）
         command -v ip6tables >/dev/null 2>&1 && {
             ip6tables -t nat -L PREROUTING --line-numbers -n 2>/dev/null |

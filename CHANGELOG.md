@@ -1,5 +1,49 @@
 # Changelog
 
+## 2026-09-23 — P1 修复：cleanup.sh 在干净系统上中途退出（卸载不完整）
+
+**真机虚拟机实测**：在已部署的机器上跑 `cleanup.sh --force`，输出停在
+`--- 清理 vpnmax 独立防火墙链 ---` 就没了，iptables 里还剩 10 条 filter + 4 条 nat 规则。
+
+### 根因（`bash -x` 定位）
+
+```bash
+command -v iptables >/dev/null 2>&1 && {
+    iptables -t nat -L PREROUTING --line-numbers -n |
+        grep -E '(DNAT|REDIRECT)...40000:42000...' |
+        awk '{print $1}' | sort -rn | while read -r num; do ...
+    done
+}          # ← 少了 || true
+```
+
+脚本是 `set -euo pipefail`。**当没有需要删的端口跳跃规则时，`grep` 无匹配返回 1**，
+`pipefail` 让整条管道返回 1 → `set -e` 直接杀掉脚本。
+
+也就是说：**卸载得越干净，这个 bug 越必然触发** —— 第一次跑清掉了链，第二次跑就死在
+清理残留 DNAT 这一步。v6 那段一直有 `|| true`（所以只有 v4 受害），印证了是漏写。
+
+### 顺带：清理动作不该用 fail-loud 包装
+
+`clean_chains` 里 16 处用的是 `run`（失败即错误），而清理的每一步（删不存在的链/规则）
+本来就该容忍失败。改为 `run_ok`。
+
+### 补两份漏删的文件
+
+- `/var/log/vpnmax-common.log`（`lib/common.sh` 建的空日志）
+- `/etc/sysctl.d/99-vpnmax-*.conf.bak`（`atomic_write` 留的备份）
+
+### 实测验证（同一台虚拟机）
+
+| 项 | 修复前 | 修复后 |
+| --- | --- | --- |
+| cleanup 是否跑完 | ❌ 停在防火墙链步骤 | ✅ 跑完全流程 |
+| filter 链残留 | 10 条 | **0** |
+| nat 链残留 | 4 条 | **0** |
+| 文件残留 | `/etc/sysctl.d/*.bak`、`/var/log/vpnmax-common.log` | **0** |
+| 进程/端口/systemd/cron | — | 全部 0 |
+
+`verify` 那端的同类修复见上一条（订阅）。
+
 ## 2026-09-23 — P0 修复：订阅全空（`sed 's://.*::g'` 会砍掉含 `//` 的 JSON 值）
 
 **真机虚拟机实测发现**：`sb.json` 完全正常，但 `clmi.yaml` 的 `port:`/`uuid:` 全空、

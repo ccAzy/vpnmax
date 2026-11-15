@@ -217,7 +217,9 @@ rm_files() {
         /var/log/vpnmax-singbox-manifest.log \
         /var/log/vpnplus-singbox-manifest.log \
         /var/log/vpnmax-sbfeed.log \
-        /var/log/vpnplus-sbfeed.log; do
+        /var/log/vpnplus-sbfeed.log \
+        /var/log/vpnmax-common.log \
+        /var/log/vpnmax-verify-tuic.log; do
         if [ -e "$path" ]; then
             run_ok rm -rf "$path"
             COUNT=$((COUNT + 1))
@@ -241,7 +243,10 @@ clean_sysctl() {
     for f in /etc/sysctl.d/99-ACVPN-security.conf /etc/sysctl.d/99-ACVPN-brutal.conf \
         /etc/sysctl.d/99-acvpn.conf /etc/sysctl.d/99-ACVPN.conf \
         /etc/sysctl.d/99-vpnmax-security.conf /etc/sysctl.d/99-vpnmax-brutal.conf \
-        /etc/sysctl.d/99-vpnmax-bbr.conf; do
+        /etc/sysctl.d/99-vpnmax-bbr.conf \
+        /etc/sysctl.d/99-vpnmax-security.conf.bak \
+        /etc/sysctl.d/99-vpnmax-brutal.conf.bak \
+        /etc/sysctl.d/99-vpnmax-bbr.conf.bak; do
         # 同上：if 形式防 set -e 在文件不存在时杀脚本
         if [ -f "$f" ]; then
             run_ok rm -f "$f"
