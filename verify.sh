@@ -44,6 +44,14 @@ VMESS_LOCK="${VMESS_LOCK:-off}"
 
 PASS=0
 FAIL=0
+# 「没这项可查」与「查了没通过」是两件事。
+# 组件没部署（如 VMESS_LOCK=off、WARP 未装、TUIC inbound 不存在）时，
+# 原来的做法是少算几项就完事——总数从 39 掉到 37，汇总仍报「全部通过」，
+# 用户看不出「检查范围变小了」。这里显式计数并印出来。
+SKIP=0
+skip() { printf '%s[-]%s   %s
+' "$CYAN" "$N" "$*"; SKIP=$((SKIP + 1)); }
+
 check() {
     local desc="$1"
     shift
@@ -362,7 +370,7 @@ if [ "$VMESS_LOCK" = "on" ]; then
         warn "未检测到 VMess 明文端口回环锁定规则"
     fi
 else
-    info "VMESS_LOCK=off：跳过明文 VMess 公网封锁检查"
+    skip "VMESS_LOCK=off：跳过明文 VMess 公网封锁检查（默认不启用该策略）"
 fi
 
 # 3c. 三处对齐（sb.json vs clmi.yaml vs iptables）— 捕获 rn1 40254/54321 岔裂
@@ -504,7 +512,13 @@ if [ -f "$_DY_CONF" ] && command -v jq >/dev/null 2>&1; then
         ok "域名分流已配置（sb.json 中含 domain 的 route 规则：${DOMAIN_COUNT} 条）"
         PASS=$((PASS + 1))
     else
-        warn "未检测到域名分流规则（sb.json 中 domain 规则数=${DOMAIN_COUNT}）"
+        # 真跑一次判据（与 lib/warp.sh:setup_domain_routing 同口径），
+        # 不能用未定义的变量——那样永远走 skip，把真问题当「没部署」放过。
+        if [ -f /etc/s-box/sbwpph ] && pgrep -f sbwpph >/dev/null 2>&1; then
+            warn "未检测到域名分流规则（WARP 进程在跑，但 sb.json 里没有 domain 规则——分流丢了）"
+        else
+            skip "未检测到域名分流规则（WARP 未运行，域名分流本就未启用）"
+        fi
     fi
 else
     warn "无法检测域名分流（/etc/s-box/sb.json 缺失或缺少 jq）"
@@ -512,7 +526,8 @@ fi
 
 echo ""
 echo "========================================="
-echo -e "  通过: ${GREEN}${PASS}${N} / 失败: ${RED}${FAIL}${N}"
+echo -e "  通过: ${GREEN}${PASS}${N} / 失败: ${RED}${FAIL}${N} / 跳过: ${CYAN}${SKIP}${N}"
+[ "${SKIP:-0}" -gt 0 ] && info "  跳过 = 该组件未部署或未启用（不是故障）；跳过越多，本次体检覆盖越少"
 echo "========================================="
 [ $FAIL -eq 0 ] && echo -e "${GREEN}部署验证全部通过。${N}" || {
     echo -e "${RED}存在失败项，请按上方提示排查。${N}"
