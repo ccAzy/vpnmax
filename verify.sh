@@ -354,38 +354,13 @@ if iptables -L "$CHAIN_ANTIPROBE" -n >/dev/null 2>&1; then
     PASS=$((PASS + 1))
 else warn "防探测链不存在"; fi
 
+# 计数助手：lib/verify/*.sh 里的检查函数用它回报结果，
+# 否则 PASS/FAIL 会少算（原来靠内联副本自己 +1，删副本后要从这里补）
+check_pass() { ok "$*"; PASS=$((PASS + 1)); }
+check_fail() { fail "$*"; FAIL=$((FAIL + 1)); }
+
 # 3b. TUIC 端口可用性（P0：40254 为已知易被墙端口）
-if declare -F verify_tuic >/dev/null 2>&1; then verify_tuic; else
-    TU_PORT=$(jq -r '.inbounds[] | select(.type=="tuic") | .listen_port' /etc/s-box/sb.json 2>/dev/null || true)
-    if [ -n "$TU_PORT" ] && [ "$TU_PORT" != "null" ]; then
-        if [ "$TU_PORT" = "40254" ]; then warn "TUIC 仍为 40254（已知易被运营商限速，建议切 54321 并重建跳跃 DNAT）"; else
-            ok "TUIC 端口 $TU_PORT 非已知污染端口"
-            PASS=$((PASS + 1))
-        fi
-        if iptables -t nat -L "$CHAIN_PORTHOP" -n 2>/dev/null | grep -q "to::${TU_PORT}"; then
-            ok "端口跳跃 DNAT 指向 TUIC $TU_PORT"
-            PASS=$((PASS + 1))
-        else warn "端口跳跃 DNAT 未指向 TUIC $TU_PORT（43000:45000 应 DNAT 到 :$TU_PORT）"; fi
-    fi
-    if [ -n "$TU_PORT" ] && [ "$TU_PORT" != "null" ] && command -v /etc/s-box/sing-box >/dev/null 2>&1; then
-        _tuic_uuid=$(jq -r '.inbounds[] | select(.type=="tuic") | .users[0].uuid' /etc/s-box/sb.json 2>/dev/null || true)
-        if [ -n "$_tuic_uuid" ] && [ "$_tuic_uuid" != "null" ]; then
-            _vport=$(shuf -i 18080-19090 -n1 2>/dev/null || echo 18081)
-            cat >/tmp/vpnmax-verify-tuic.json <<JSON_TMP
-{"log":{"level":"error"},"inbounds":[{"type":"socks","listen":"127.0.0.1","listen_port":$_vport}],"outbounds":[{"type":"tuic","server":"127.0.0.1","server_port":$TU_PORT,"uuid":"$_tuic_uuid","password":"$_tuic_uuid","congestion_control":"bbr","tls":{"enabled":true,"server_name":"www.bing.com","insecure":true,"alpn":["h3"]}}]}
-JSON_TMP
-            timeout 4 /etc/s-box/sing-box run -c /tmp/vpnmax-verify-tuic.json >/tmp/vpnmax-verify-tuic.log 2>&1 &
-            _vpid=$!
-            sleep 2
-            if curl -s -o /dev/null -w '%{http_code}' --socks5-hostname 127.0.0.1:"$_vport" --connect-timeout 4 --max-time 6 https://www.google.com/generate_204 2>/dev/null | grep -q '204'; then
-                ok "TUIC 本地回环自检通（127.0.0.1:$TU_PORT → google 204）"
-                PASS=$((PASS + 1))
-            else warn "TUIC 本地回环不通（本机 sing-box 或证书异常，非外网墙）"; fi
-            kill -9 $_vpid 2>/dev/null || true
-            rm -f /tmp/vpnmax-verify-tuic.json /tmp/vpnmax-verify-tuic.log 2>/dev/null || true
-        fi
-    fi
-fi
+verify_tuic   # 唯一实现在 lib/verify/tuic.sh；此处不再留内联副本
 
 if [ "$VMESS_LOCK" = "on" ]; then
     if iptables-save 2>/dev/null | grep -q '! -i lo'; then

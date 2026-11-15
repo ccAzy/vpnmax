@@ -1,5 +1,55 @@
 # Changelog
 
+## 2026-09-23 — verify 每次运行漏一个 sing-box 进程（+ 同一段代码的第二份副本）
+
+跑中断测试时顺手 `pgrep`，发现两个不该存在的进程：
+
+```
+52059 /etc/s-box/sing-box run -c /tmp/vpnmax-verify-tuic.json
+56014 /etc/s-box/sing-box run -c /tmp/vpnmax-verify-tuic.json
+```
+
+再跑一次 verify：`before=2 after=3`。**每跑一次 verify 就漏一个**。
+
+### 根因
+
+```bash
+timeout 4 /etc/s-box/sing-box run -c /tmp/vpnmax-verify-tuic.json &
+_vpid=$!
+...
+kill -9 $_vpid      # ← 杀的是 timeout，不是 sing-box
+```
+
+`$!` 是 `timeout` 的 PID，sing-box 是它的子进程。`kill -9` 掉 `timeout` 后
+sing-box 被孤儿化、继续跑（配置文件随后被 `rm` 掉，进程却活着）。
+顺带 `timeout 4` 比 `curl --max-time 6` 还短 —— 后端可能在测试中途就被砍。
+
+修法：`pkill -9 -f 'vpnmax-verify-tuic\.json'`（按唯一配置名精确清理，顺带收掉历史遗留）
++ `disown`（否则 pkill 后 bash 会打印一行 `Killed`，混在验证结果里像报错）。
+
+### 同一段代码的第二份副本
+
+修完才注意到 `verify.sh` 里还有一份内联副本：
+
+```bash
+if declare -F verify_tuic >/dev/null 2>&1; then verify_tuic; else
+    ... 31 行，同样的 kill $!  bug ...
+fi
+```
+
+正常走的是 lib 那份（内联是死代码），但**bug 在两份里都存在**——这正是项目一直在消除的
+「双实现」问题。删掉 31 行内联副本，只留 `lib/verify/tuic.sh`；
+同时给 lib 加 `check_pass`/`check_fail` 助手，让删掉副本后 PASS/FAIL 计数不丢。
+
+### 实测
+
+| 项 | 修复前 | 修复后 |
+| --- | --- | --- |
+| 连跑 3 次 verify 后的孤儿进程 | 3 | **0** |
+| `Killed` 噪音行 | 有 | **0** |
+| 结果 | 37 通过 / 0 失败 | 39 通过 / 0 失败（补回之前未计数的 2 项） |
+| verify 退出码 | 0 | 0 |
+
 ## 2026-09-23 — cleanup 又两处：链被装回来 + 成功时反而 exit=1
 
 跑完整路径（deploy → cleanup）时发现：清理后 iptables 里仍有
@@ -29,6 +79,7 @@ remaining=$(pgrep -f 'sing-box|cloudflared...' 2>/dev/null | wc -l)
 ```
 
 `pgrep` 无匹配返回 1，`pipefail` 让整行失败，`set -e` 直接终止脚本 —— 于是：
+
 - **一个进程都不剩（最成功的情况）→ 脚本静默中止，不打收尾结论，exit=1**
 - 还剩进程（失败的情况）→ 正常走完
 
