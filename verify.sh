@@ -499,20 +499,20 @@ if [ -f /etc/s-box/subport.log ] && [ -f /etc/s-box/subtoken.log ]; then
             fail "订阅服务未响应（本机 HTTP $LOCAL_HTTP）— 检查 busybox httpd"
             FAIL=$((FAIL + 1))
         fi
+    fi
 
-        # 订阅「能访问」不等于「内容可用」：sb 的订阅生成在某些菜单路径下会产出
-        # port/uuid 全空的配置（链接形如 vless://@1.2.3.4:?），HTTP 照样 200。
-        # 这里直接查内容里有没有空字段，避免「订阅打得开但导入后连不上」的假绿灯。
-        if [ -f /etc/s-box/clmi.yaml ]; then
-            _empty=$(grep -nE "^\s*(port|uuid):\s*$" /etc/s-box/clmi.yaml 2>/dev/null | head -3 || true)
-            _badlink=$(grep -cE "://@?[0-9a-fA-F.:]*:\?" /etc/s-box/jhsub.txt 2>/dev/null || echo 0)
-            if [ -n "$_empty" ] || [ "${_badlink:-0}" -gt 0 ]; then
-                fail "订阅内容有空字段（clmi 空 port/uuid=${_empty:-无}；jhsub 残缺链接=${_badlink} 条）"
-                warn "现象：订阅能打开，但导入客户端后节点无端口/UUID，连不上。重跑 deploy_singbox.sh --force 或手动 sb → 3 → 8 → 1 重新生成"
-            else
-                ok "订阅内容完整（port/uuid 非空，链接无残缺）"
-                PASS=$((PASS + 1))
-            fi
+    # 订阅「能访问」不等于「内容可用」：sb 的订阅生成在某些菜单路径下会产出
+    # port/uuid 全空的配置（链接形如 vless://@1.2.3.4:?），HTTP 照样 200。
+    # 这里直接查内容里有没有空字段，避免「订阅打得开但导入后连不上」的假绿灯。
+    if [ -f /etc/s-box/clmi.yaml ]; then
+        _empty=$(grep -nE "^\s*(port|uuid):\s*$" /etc/s-box/clmi.yaml 2>/dev/null | head -3 || true)
+        _badlink=$(grep -cE "://@?[0-9a-fA-F.:]*:\?" /etc/s-box/jhsub.txt 2>/dev/null || echo 0)
+        if [ -n "$_empty" ] || [ "${_badlink:-0}" -gt 0 ]; then
+            fail "订阅内容有空字段（clmi 空 port/uuid=${_empty:-无}；jhsub 残缺链接=${_badlink} 条）"
+            warn "现象：订阅能打开，但导入客户端后节点无端口/UUID，连不上。重跑 deploy_singbox.sh --force 或手动 sb → 3 → 8 → 1 重新生成"
+        else
+            ok "订阅内容完整（port/uuid 非空，链接无残缺）"
+            PASS=$((PASS + 1))
         fi
     fi
 else
