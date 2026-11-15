@@ -1,5 +1,52 @@
 # Changelog
 
+## 2026-09-23 — cleanup 又两处：链被装回来 + 成功时反而 exit=1
+
+跑完整路径（deploy → cleanup）时发现：清理后 iptables 里仍有
+`VPNMAX_ANTIPROBE` / `VPNMAX_PORTHOP` 两条空链 + 两条跳转，cleanup 退出码 **1**。
+
+### 1. 链被删掉后又被装回来
+
+日志顺序说明了一切：
+
+```
+--- 清理 vpnmax 独立防火墙链 ---
+[+]   独立防火墙链已清理（未触碰第三方规则）     ← 清掉了
+[+]   vpnmax-netfilter-restore.service 已删除     ← 删这个 unit 触发 daemon-reload
+[!]   vpnmax 独立防火墙链仍存在                   ← 又回来了
+```
+
+`rm_units` 删掉 `vpnmax-netfilter-restore.service` 时 systemd 会 reload，
+该 unit 若在此期间被执行一次，就会把保存的 iptables 规则重新应用。
+
+修法：链清理跑两遍（开头清一遍避免带着链做后续操作，末尾再清一遍兜底）。
+清理本身幂等，跑两次无害。
+
+### 2. 清理得越干净，退出码越是 1
+
+```
+remaining=$(pgrep -f 'sing-box|cloudflared...' 2>/dev/null | wc -l)
+```
+
+`pgrep` 无匹配返回 1，`pipefail` 让整行失败，`set -e` 直接终止脚本 —— 于是：
+- **一个进程都不剩（最成功的情况）→ 脚本静默中止，不打收尾结论，exit=1**
+- 还剩进程（失败的情况）→ 正常走完
+
+和之前 `verify.sh` 里 `grep -c || echo 0` 是同一类问题，只是这次藏得更深：
+它只在「做对了」的时候触发。
+
+改为 `{ pgrep ... || true; } | wc -l`。
+
+### 实测
+
+| 项 | 修复前 | 修复后 |
+| --- | --- | --- |
+| cleanup 退出码 | 1 | **0** |
+| filter 链残留 | 2 | **0** |
+| nat 链残留 | 2 | **0** |
+| 收尾结论 | 不打印 | `清理完成。可以开始部署。` |
+| 连跑两次（幂等） | — | 两次都 EXIT=0 |
+
 ## 2026-09-23 — `--reset-sub` 的说明书说了它做不到的事
 
 实测 `deploy_singbox.sh --reset-sub`：

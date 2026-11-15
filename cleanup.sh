@@ -345,7 +345,9 @@ verify_clean() {
         PASS=$((PASS + 1))
     fi
     # 注意：pgrep -c 会把自己的 shell 也算进 /bin/bash 匹配，用 -f + 精确进程名排除干扰
-    remaining=$(pgrep -f 'sing-box|cloudflared.*tunnel.*--url' 2>/dev/null | wc -l)
+    # pgrep 无匹配返回 1，pipefail + set -e 会让整行失败并静默终止脚本——
+    # 偏偏「清理得最干净」时才会触发，于是成功反而报 exit=1 且不打收尾结论。
+    remaining=$( { pgrep -f 'sing-box|cloudflared.*tunnel.*--url' 2>/dev/null || true; } | wc -l)
     if [ "$remaining" -eq 0 ]; then
         ok "进程已清理"
         PASS=$((PASS + 1))
@@ -362,8 +364,13 @@ verify_clean() {
     echo -e "${GREEN}清理完成。可以开始部署。${N}"
 }
 
+# 清理链要跑两次：
+#   ① 先清一遍，避免清理过程中服务重载时带着这些链
+#   ② 末尾再清一遍——实测 rm_units 删 vpnmax-netfilter-restore.service 时 systemd
+#      daemon-reload 会触发该 unit 的一次执行，把 VPNMAX_* 链又装回来
+#      （日志：链已清理 → 删 unit → 验证发现链仍在）。链清理是幂等的，跑两遍无害。
 bak_firewall
-clean_chains
+clean_chains   # ① 先清一遍
 stop_services
 kill_procs
 kill_sub_httpd
@@ -372,4 +379,5 @@ rm_units
 rm_files
 clean_sysctl
 clean_nft
+clean_chains   # ② 末尾复清（见上方注释）
 verify_clean
