@@ -23,6 +23,8 @@ vpnmax 用来在 Debian/Ubuntu VPS 上快速部署代理节点，并自动完成
 - WARP 域名分流
 - **IPv4 锁定**：入口 IP 走 SB 15-1 切换（订阅 server: 用 IPv4），出口 `route/outbounds/dns` 仅 `--force` 时原子 `jq` 改 `ipv4_only`（`sb-yg` 重建回退 `prefer_ipv6` 自动纠回）、`gai.conf` 单行幂等、`sing-box 1.12+ legacy` 兼容（`ENABLE_DEPRECATED...`）
 - Clash/Mihomo、Sing-box 和通用订阅生成（**订阅端口重跑保持不变**，客户端地址长期有效）
+- **内核默认跟随上游最新**（`VPNMAX_SINGBOX_PIN=x.y.z` 可冻结）；能否使用由真实
+  `sing-box check` 解析判定，不看版本号
 - 防主动探测和安全清理
 
 建议 VPS 至少有 1GB 内存。512MB 也可以尝试，但同时运行 BBRv3、Argo、WARP 和 sing-box 时更容易内存不足。
@@ -160,6 +162,8 @@ SERVER_IP="你的服务器IP" bash verify.sh
 - **时间同步**：`chrony Leap Normal` / `System clock synchronized` / `ntpdate` 偏移（P0，Reality/VMess 对时）
 - **IPv4 锁定**：`gai.conf 单行 / legacy env / 出口 route/outbounds/dns ipv4_only` + **订阅入口 IP 已切 IPv4**（JP/HK 订阅回退根因）
 - sing-box 是否安装和运行
+- **内核与配置配对**：实跑 `sing-box check -c sb.json`（不看版本号——版本号会误杀可用组合，
+  也会放过「版本够新但配置真坏」）
 - BBRv3 是否存在
 - fq 和网卡优化状态
 - 持久化网络调优服务
@@ -233,6 +237,25 @@ RESET_SUB=1 bash deploy_singbox.sh
 
 旧链接立即 `404`，新订阅 `clmi.yaml/tuic5.txt` 已切到新 `token/端口`，TUIC 当前为 `54321`（`40254` 已知易被限速，`verify.sh` 会黄灯提醒）
 
+## 重复执行与并发
+
+**幂等**：重跑自动跳过已完成步骤；订阅端口保持不变，客户端地址长期有效。
+
+**并发保护**：同一台机器同时只能跑一个 vpnmax 实例，第二个会在启动时被拒并说明原因：
+
+```
+[x]   另一个 vpnmax 实例正在运行（PID 12345，锁：/var/lock/vpnmax-system.pid）
+```
+
+deploy / optimize / cleanup 共用同一把锁 —— 「部署跑到一半被清理」是最危险的组合。
+进程被强杀后残留的锁会在下次运行时自动接管，不需要手动删文件。
+
+**网络兜底**：`lib/` 自举与第三方二进制下载都按白名单在 `raw.githubusercontent.com`
+与 `cdn.jsdelivr.net` 之间自动回落；下载带 `--connect-timeout`，网络不通时 20 秒内给出
+明确结论，不会让终端长时间无输出地干等。
+
+---
+
 ## 项目结构（lib 唯一源码；单文件运行时自举）
 
 `lib/` 是**唯一源码**：入口脚本只做「引导 + 编排」，不再各自抄一份内联实现。
@@ -241,7 +264,7 @@ RESET_SUB=1 bash deploy_singbox.sh
 
 ```
 lib/boot.sh        # 引导层：定位 lib 来源，缺失则自举取回（全项目唯一的引导代码）
-lib/common.sh      # 日志/颜色/run 与 run_ok/BASE_PACKAGES+chrony/gai.conf
+lib/common.sh      # 日志/颜色/run 与 run_ok/BASE_PACKAGES+chrony/gai.conf/并发锁 vpnmax_lock
 lib/time.sh        # ensure_time_sync
 lib/hardening.sh   # 安全 sysctl（网络感知 RA）+ systemd LimitNOFILE
 lib/optimize.sh    # BBRv3 + sysctl/ethtool/qdisc（按内存分级）+ 智能带宽/亚太调优
