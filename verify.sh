@@ -472,7 +472,10 @@ if [ -f /etc/s-box/subport.log ] && [ -f /etc/s-box/subtoken.log ]; then
             # token 可能为空（sb 未生成 token 时订阅路径是 /<file>），不能硬拼出 //
             _sp="/${fmt}"
             [ -n "$SUBTOKEN" ] && _sp="/${SUBTOKEN}/${fmt}"
-            HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10                 "http://${SERVER_IP}:${SUBPORT}${_sp}" 2>/dev/null)
+            # --noproxy：这里测的是「我们自己的服务器有没有在服务」，
+            # 用户机器上残留 http_proxy 时请求会被送进代理，代理回 502，
+            # 于是整项误判为不可访问（实测）——必须绕代理直连。
+            HTTP_CODE=$(curl -s --noproxy '*' -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 "http://${SERVER_IP}:${SUBPORT}${_sp}" 2>/dev/null)
             # curl 失败时 %{http_code} 会输出 000；不要再 `|| echo 000`（会把两个 000 粘成 000000）
             [ -z "$HTTP_CODE" ] && HTTP_CODE=000
             if [ "$HTTP_CODE" = "200" ]; then

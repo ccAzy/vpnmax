@@ -93,10 +93,10 @@ SB_COMMIT="5001e76efc9e15eac1f8ff33a0b389172e331e1d"
 #   ① acme.sh / CFwarp.sh / sbwpph 改为 pin commit + SHA256 校验（不再裸拉上游 main 后 root 执行）
 #   ② 版本 pin：sing-box 1.13.19 / cloudflared 2026.8.3 / cfst v2.3.5（pin 拉不到才告警回退 latest）
 #   ③ bbr() 改本地最小实现（不再拉 teddysun/across，避免覆盖本项目的 TCP buffer 调优）
-SB_SHA256="451c2dfb623641d2083c30eb050f039b46d3b4b6a5f99bf689ae5b964f736f29"
+SB_SHA256="2fcdd73438ab46590ec2114ffe32a6a826026fbb78fa995d6335fe9b061a2b2a"
 # apply_argo_patch 只把 --protocol http2 改成 auto 后的精确哈希。
 # 只信任这两个当前版本哈希；旧 /etc/s-box/.sb-argo-patched.sha256 不再能“保活”历史 sb.sh。
-SB_ARGO_PATCHED_SHA256="5f939ffcd78e0b2e1b7a062d5aad23c29674da769ec10ae846850ec342027685"
+SB_ARGO_PATCHED_SHA256="5c9f866fc0e433505106ac11f3a9f1e1a723f290cd09d90b3f2525ba49fc50be"
 SB_URL="https://raw.githubusercontent.com/ccAzy/vpnmax/main/vendor/sb.sh"
 
 # ── 环境预检 + 第二阶段依赖兜底 ──
@@ -298,37 +298,5 @@ EOF
     fi
 }
 
-step() {
-    step_elapsed
-    echo ""
-    echo -e "${YELLOW}╔══════════════════════════════════════════════════╗${N}"
-    echo -e "${YELLOW}║  [$1] $2"
-    echo -e "${YELLOW}╚══════════════════════════════════════════════════╝${N}"
-    _STEP_T0=$SECONDS
-    _STEP_LABEL="[$1] $2"
-}
-
-# 打印上一步耗时。部署全程 4~6 分钟，中间没有心跳的话，卡住和正常等待
-# 对用户长得一模一样——只能干盯着屏幕猜。
-step_elapsed() {
-    [ -n "${_STEP_T0:-}" ] && [ -n "${_STEP_LABEL:-}" ] && \
-        printf '        └─ %s 用时 %ds\n' "$_STEP_LABEL" "$((SECONDS - _STEP_T0))"
-    return 0
-}
-
-# 收尾汇总：几百行输出里的 [!] 会被忽略，这里重列一遍
-summary_warnings() {
-    local n=${#VPNMAX_WARNINGS[@]}
-    if [ "$n" -eq 0 ]; then
-        ok "全程无警告"
-        return 0
-    fi
-    echo ""
-    info "━━━ 需要注意（$n 条）━━━"
-    local w
-    for w in "${VPNMAX_WARNINGS[@]}"; do printf '     - %s\n' "$w"; done
-    echo ""
-    info "以上不影响使用；要逐项体检请跑: bash verify.sh"
-}
 
 main "$@"

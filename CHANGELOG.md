@@ -1,5 +1,81 @@
 # Changelog
 
+## 2026-09-23 — 自主测试循环：修掉 6 个新问题（含 3 个「假绿灯」）
+
+按「修 → 测 → 修」循环跑了 11 轮，每轮都在真机虚拟机上实跑。发现的都不是语法错误，
+而是**看起来正常、实际说谎**的那一类。
+
+### 1. 时间同步假绿灯（最严重）
+
+```
+[+]   时间已同步（chrony Normal）
+[*]   timedatectl: System clock synchronized: no;  NTP service: active;
+```
+
+**同一个输出里前后打架。** 根因：判据用的是 `Leap status: Normal`——那只表示
+「没有闰秒事件」，完全不代表已同步。而 chrony 真正的判据是 `Reference ID` 是否以 `.`
+开头（`.` = 尚未选中源）。
+
+危害不小：时间没同步时 Reality/VMess 会因时间戳偏差握手失败，而脚本告诉你「已同步」，
+于是你在客户端反复换节点、换协议，永远查不到原因。
+
+改为双判据（`Leap Normal` **且** `Reference ID` 非 `.`）+ 最多等 16s；未同步时明确说出
+后果和修法（`chronyc makestep`）。
+
+### 2. 上游 `'unknown': I need something more specific.` 泄漏
+
+每次调 `sb` 都在开头打这一行，看着像报错。根因：非交互环境 `TERM=unknown`，
+sb 里的 `tput` 调用让 ncurses 报错。`sb_feed` 现在临时设 `TERM=xterm`，并同时清掉
+sb 输出里的清屏转义（`ESC[H/2J/3J`）。
+
+### 3. 下载卡死 87 秒
+
+```
+curl: (7) Failed to connect to raw.githubusercontent.com port 443 after 87046 ms
+```
+
+`vpnmax_fetch_pinned` 没有 `--connect-timeout`，加上 `--retry 2` 会把等待放大到数分钟。
+现在 20s 连接超时 / 300s 总超时，**实测从 87s 降到 0.4s 就给出明确结论**。
+
+### 4. GitHub 不可达时整个自举失败（国内必现）
+
+`vpnmax_fetch` 只用 `$VPNMAX_RAW` 一个源。现在按 allowlist 依次回落
+`cdn.jsdelivr.net/gh/ccAzy/vpnmax@main`——两个地址本来就在白名单里，不引入新的信任方。
+两条下载路径（我们自己的 lib/、第三方 sbwpph）都加了镜像回落。
+实测：把首选源换成不存在的分支，仍能从镜像取回文件（`FALLBACK-OK`）。
+
+### 5. 本机自检被 `http_proxy` 污染
+
+用户机器上常残留 `http_proxy`，连 `127.0.0.1` 也会被送进代理，代理回 502，
+于是「订阅不可用」。`verify.sh` 与 `lib/subscription.sh` 的本机/自有服务器检查
+一律加 `--noproxy '*'`。
+
+### 6. 可选组件失败与致命失败混为一谈
+
+WARP 没装上和订阅坏了在输出里长得一样（都是 `[!]`）。现在分两级：
+
+| 级别 | 前缀 | 收尾 |
+| --- | --- | --- |
+| 核心警告 | `[!]` | 「需要注意（N 条）」+ 复查命令 |
+| 可选组件 | `[i]` | 「可选组件未就绪（N 条，不影响代理可用）」+ 各自修复入口 |
+| 长期提示 | `[i]` | 只原地打印，不进汇总（避免同一句免责声明出现两次） |
+
+### 顺带：UI 函数下沉 lib/（消除第三处重复）
+
+`step()` / `step_elapsed()` / `summary_warnings()` 原本是 `deploy_singbox.sh` 和
+`deploy_optimize.sh` 各一份。现在统一在 `lib/common.sh`，两个入口脚本都获得了
+**每步耗时 + 总耗时 + 收尾汇总**（原本只有 deploy_singbox 有）。
+
+### 实测（11 轮，同一台 Debian 12 虚拟机）
+
+| 项 | 结果 |
+| --- | --- |
+| 完整用户路径 bootstrap → optimize → deploy → verify | 全部 EXIT=0 |
+| `verify.sh` | **37 通过 / 0 失败** |
+| `cleanup.sh` 后残留 | 进程/端口/链/文件/systemd/cron 全 0 |
+| 部署输出行数 | 921 → **210** |
+| 输出里的自相矛盾 | 3 处 → **0** |
+
 ## 2026-09-23 — 部署输出瘦身 76% + 修掉 4 处自相矛盾的假警报
 
 实测一台干净 Debian 12 从头部署：**921 行输出里只有 53 行是我方进度**，其余是上游 sb

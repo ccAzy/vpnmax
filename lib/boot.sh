@@ -31,12 +31,12 @@ VPNMAX_VENDOR_FILES="sb.sh"
 # lib 版本戳：**每次改动 lib/ 就把它改掉**。服务器靠它判断要不要重拉已缓存的模块——
 # 旧逻辑只补缺失文件，缓存一旦落地就冻结，lib 的修复永远到不了线上（2026-09-23 连踩两次）。
 # 联动门禁见 tools/check-lib-integrity.py R7b（格式 + BOOT 自哈希 + 双哈希一致性）。
-VPNMAX_LIB_REV="2026-09-23.17"
+VPNMAX_LIB_REV="2026-09-23.24"
 
 # boot.sh 自哈希（归一化自哈希：把下一行的值置空后对本文件取 sha256）。
 # **每次改动 lib/boot.sh 都必须重算本常量**，否则 R7b 门禁失败拒绝安装。
 # 重算：sed 's/^BOOT_SHA256=".*"/BOOT_SHA256=""/' lib/boot.sh | sha256sum
-BOOT_SHA256="35eede37e811b2b55435a0b4aa5f7b60bdf57e93a8b9389b814405a39aad2925"
+BOOT_SHA256="01a86a76eb42a1c07d7cffb9c0d9e62c30e3cb1e978f6914d45049e808c77151"
 
 # 远端源 allowlist（供应链 RCE 防线：VPNMAX_RAW 只能是自家源）。
 # vpnmax_fetch / 各入口自举下载前必经 vpnmax_raw_allowed()，命中失败即 fail-closed 中止。
@@ -85,14 +85,26 @@ vpnmax_verify_boot() {
 
 # 取一个远端文件；失败返回 1。超时刻意取小：这是首次运行的前置步骤，
 # 一旦不可达宁可 5 秒内明确报错，也不要让用户对着空白终端等一分钟。
+# 多源回落：raw.githubusercontent.com 在国内常被重置/超时（实测 87s 不返回），
+# 依次再试 allowlist 里的镜像。两个地址都在白名单内，不引入新的信任方。
 vpnmax_fetch() { # <远端相对路径> <落到本地路径> <max-time>
-    local url="$VPNMAX_RAW/$1" out="$2" tmp
+    local rel="$1" out="$2" max="${3:-30}" base tmp _hb _ok allow
     vpnmax_raw_allowed || return 1
-    tmp=$(mktemp "${out}.vpnmax.XXXXXX" 2>/dev/null) || return 1
-    if curl -fsSL --connect-timeout 5 --max-time "${3:-30}" "$url" -o "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
-        mv -f "$tmp" "$out" && return 0
-    fi
-    rm -f "$tmp" 2>/dev/null || true
+    for base in "$VPNMAX_RAW" "https://cdn.jsdelivr.net/gh/ccAzy/vpnmax@main"; do
+        # 白名单按「前缀」匹配：条目是 host/path，镜像实际 URL 还带 @ref，
+        # 不能用整串相等（写成 *" $base "* 会永远匹配不上）。
+        _hb="${base#https://}"
+        _ok=0
+        for allow in $VPNMAX_RAW_ALLOW; do
+            case "$_hb" in "$allow"*) _ok=1; break ;; esac
+        done
+        [ "$_ok" = 1 ] || continue
+        tmp=$(mktemp "${out}.vpnmax.XXXXXX" 2>/dev/null) || return 1
+        if curl -fsSL --connect-timeout 5 --max-time "$max" "$base/$rel" -o "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+            mv -f "$tmp" "$out" && return 0
+        fi
+        rm -f "$tmp" 2>/dev/null || true
+    done
     return 1
 }
 

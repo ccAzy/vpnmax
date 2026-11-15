@@ -30,6 +30,62 @@ warn() {
 ' "$YELLOW" "$N" "$*"
     VPNMAX_WARNINGS+=("$*")
 }
+# 可选组件/环境限制专用：WARP、Argo 这类失败不影响核心代理，
+# 与「订阅坏了」同用 [!] 会让用户分不清哪条真要命。
+VPNMAX_NOTES=()
+note() {
+    printf '%s[i]%s   %s
+' "$CYAN" "$N" "$*"
+    VPNMAX_NOTES+=("$*")
+}
+# 长期提示（不是本次部署的问题）：只原地打印，不进入收尾汇总，
+# 否则一句永久免责声明会在末尾重复出现一次。
+hint() { printf '%s[i]%s   %s
+' "$CYAN" "$N" "$*"; }
+
+# ── 步骤横幅 / 耗时 / 收尾汇总（唯一来源；入口脚本不再各抄一份）──
+# 部署全程 4~6 分钟，中间没有心跳的话，卡住和正常等待长得一模一样。
+step() {
+    step_elapsed
+    echo ""
+    echo -e "${YELLOW}╔══════════════════════════════════════════════════╗${N}"
+    echo -e "${YELLOW}║  [$1] $2"
+    echo -e "${YELLOW}╚══════════════════════════════════════════════════╝${N}"
+    _STEP_T0=$SECONDS
+    _STEP_LABEL="[$1] $2"
+}
+
+step_elapsed() {
+    [ -n "${_STEP_T0:-}" ] && [ -n "${_STEP_LABEL:-}" ] &&         printf '        └─ %s 用时 %ds
+' "$_STEP_LABEL" "$((SECONDS - _STEP_T0))"
+    return 0
+}
+
+# 收尾汇总：几百行输出里的 [!] 会被忽略，这里重列一遍，并区分
+# 「核心警告」（要处理）与「可选组件未就绪」（不影响能上网）。
+summary_warnings() {
+    local n=${#VPNMAX_WARNINGS[@]} m=${#VPNMAX_NOTES[@]} w
+    if [ "$n" -eq 0 ] && [ "$m" -eq 0 ]; then
+        ok "全程无警告"
+        return 0
+    fi
+    if [ "$n" -gt 0 ]; then
+        echo ""
+        info "━━━ 需要注意（$n 条）━━━"
+        for w in "${VPNMAX_WARNINGS[@]}"; do printf '     - %s
+' "$w"; done
+        info "   处理完跑: bash verify.sh 复查"
+    fi
+    if [ "$m" -gt 0 ]; then
+        echo ""
+        info "━━━ 可选组件未就绪（$m 条，不影响代理可用）━━━"
+        for w in "${VPNMAX_NOTES[@]}"; do printf '     - %s
+' "$w"; done
+        info "   Argo: sb → 4    WARP: sb → 14    分流: sb → 5"
+    fi
+    return 0
+}
+
 fail() { printf '%s[x]%s   %s
 ' "$RED" "$N" "$*"; }
 

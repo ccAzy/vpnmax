@@ -10,10 +10,16 @@ sb_feed() { # sb_feed <超时秒数> - <<'KEYS'  ... KB: 用 stdin 传入按键
     local secs="${1:-120}"
     shift
     local out _before _after _pid _new_pids=""
+    # 非交互环境里 TERM 常为 unknown/未设，sb 里的 tput 会报
+    #   'unknown': I need something more specific.
+    # 这是 ncurses 找不到终端类型，不是脚本错误——但用户会当成报错。
+    local _term_orig="${TERM:-}"
+    case "$_term_orig" in ''|unknown|UNKNOWN) export TERM=xterm ;; esac
     # 记录本函数开始前已有的 sb 进程，只杀本次新产生的孤儿（不误伤同机其他 sb 会话）
     _before=$(pgrep -f 'bash /usr/bin/sb' 2>/dev/null | sort -n | tr '\n' ' ' || true)
     out=$(timeout "$secs" sb "$@" 2>&1 || true) || true
     _after=$(pgrep -f 'bash /usr/bin/sb' 2>/dev/null | sort -n | tr '\n' ' ' || true)
+    [ -z "$_term_orig" ] || export TERM="$_term_orig"
     for _pid in $_after; do
         case " $_before " in *" $_pid "*) ;; *) _new_pids="$_new_pids $_pid" ;; esac
     done
@@ -34,7 +40,7 @@ sb_feed() { # sb_feed <超时秒数> - <<'KEYS'  ... KB: 用 stdin 传入按键
 #   ③ 超长行：WARP 分流域名清单（上百个域名挤一行）
 # 错误、提示、提问、确认一律保留——宁可多留，不能吞掉真正的报错。
 _sb_console_filter() {
-    sed -E 's/\x1B\[[0-9;]*[mK]//g' | awk '
+    sed -E 's/\x1B\[[0-9;]*[mK]//g; s/\x1B\[[0-9;]*[HJK]//g' | awk '
         BEGIN { skip = 0; n = 0; blank = 0 }
         { sub(/[ \t]+$/, "") }
         index($0, "░")            { next }

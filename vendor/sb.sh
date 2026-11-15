@@ -38,10 +38,22 @@ VPNMAX_SBWPPH_SHA_ARM64="4a8f0419e4b848b99017128d532bd760f6daa4a7b0bc9f59ff16610
 
 # 下载并按 SHA256 校验；通过返回 0。失败一律返回 1，调用方不得静默回落上游 main。
 vpnmax_fetch_pinned(){
-local _url="$1" _sha="$2" _out="$3" _label="$4"
+local _url="$1" _sha="$2" _out="$3" _label="$4" _err="" _mirror=""
 rm -f "$_out"
-if ! curl -fsSL --proto '=https' --tlsv1.2 --retry 2 -o "$_out" "$_url"; then
-red "下载 $_label 失败：$_url"; return 1
+# --connect-timeout/--max-time 是必需的：raw.githubusercontent.com 在受限网络下
+# 连接阶段能挂 87s 不返回（实测），--retry 2 会把这个等待放大到数分钟。
+# 失败后回落 jsDelivr 镜像（同一 GitHub commit，内容可 SHA256 验证）。
+_mirror=$(printf '%s' "$_url" | sed -n 's#^https://raw\.githubusercontent\.com/\([^/]*\)/\([^/]*\)/\([^/]*\)/#https://cdn.jsdelivr.net/gh/\1/\2@\3/#p')
+if ! _err=$(curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 20 --max-time 300 --retry 2 -o "$_out" "$_url" 2>&1); then
+    if [ -n "$_mirror" ] && [ "$_mirror" != "$_url" ]; then
+        if _err=$(curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 20 --max-time 300 -o "$_out" "$_mirror" 2>&1); then
+            _err=""
+        else
+            red "下载 $_label 失败（原站与镜像均不可达）"; red "  $_err"; return 1
+        fi
+    else
+        red "下载 $_label 失败：${_err:-未知原因}"; return 1
+    fi
 fi
 if ! echo "$_sha  $_out" | sha256sum -c - >/dev/null 2>&1; then
 red "$_label 校验不通过（与 pin 的 SHA256 不一致），已丢弃"; rm -f "$_out"; return 1

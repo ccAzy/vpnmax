@@ -61,7 +61,7 @@ EOSUB
         url=$(grep -aom1 'https\?://[a-z0-9.-]*\.trycloudflare\.com' /etc/s-box/argo.log 2>/dev/null || true)
         [ -n "$url" ] && info "Argo URL: $url"
     else
-        warn "Argo 隧道未启动，使用直连 IP"
+        note "Argo 隧道未启动，使用直连 IP"
         info "稍后手动: sb → 3 → 3 → 1 → 1"
     fi
 }
@@ -103,14 +103,14 @@ ensure_argo_extra_applied() {
     wsport=$(jq -r '[.inbounds[] | select(.type=="vless" and .transport.type=="ws") | .listen_port][0] // empty' /etc/s-box/sb.json 2>/dev/null)
     [ -n "$wsport" ] && [ "$wsport" != "null" ] || wsport=$(jq -r '.inbounds[1].listen_port // empty' /etc/s-box/sb.json 2>/dev/null)
     [ -n "$wsport" ] || {
-        warn "WS 端口解析失败，跳过对齐"
+        note "WS 端口解析失败，跳过对齐"
         return 0
     }
     local cfbin
     cfbin=$(command -v cloudflared 2>/dev/null)
     [ -x "${cfbin:-}" ] || cfbin=$(ls /etc/s-box/cloudflared /usr/local/bin/cloudflared 2>/dev/null | head -1)
     [ -x "${cfbin:-}" ] || {
-        warn "cloudflared 缺失，跳过对齐"
+        note "cloudflared 缺失，跳过对齐"
         return 0
     }
     pkill -x cloudflared 2>/dev/null || true
@@ -125,7 +125,7 @@ ensure_argo_extra_applied() {
     if [ "$cnt" -eq 1 ] && grep -ao 'https://[a-z0-9.-]*\.trycloudflare\.com' /etc/s-box/argo.log 2>/dev/null | tail -1 | grep -q .; then
         ok "隧道已带优选参数重启（单实例，域名已更新，订阅由 keepalive L3 同步）"
     else
-        warn "对齐后隧道异常（进程数 $cnt），keepalive 下轮自动修复"
+        note "对齐后隧道异常（进程数 $cnt），keepalive 下轮自动修复"
     fi
 }
 

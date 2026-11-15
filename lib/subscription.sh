@@ -233,6 +233,7 @@ show_subscription() {
     echo "通用聚合:"
     echo "http://${public_ip}:${sub_port}/${token}/jhsub.txt"
     echo ""
-    warn "订阅链接使用 HTTP + IP:端口；移动网络可能拦截高端口，必要时改用 Argo/HTTPS 入口。"
+    # 这是一条长期提示而非本次部署的问题，不该出现在「需要注意」里
+    hint "订阅走 HTTP + IP:端口；移动网络可能拦截高端口，必要时改用 Argo/HTTPS 入口。"
     return 0
 }

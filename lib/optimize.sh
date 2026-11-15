@@ -584,7 +584,7 @@ apply_smart_bandwidth_tuning() {
         local ip country
         ip=$(curl -s4m5 https://api.ipify.org 2>/dev/null || true)
         if [ -n "$ip" ]; then
-            country=$(curl -s "https://ipinfo.io/$ip/country" 2>/dev/null || true)
+            country=$(curl -s --connect-timeout 5 --max-time 8 "https://ipinfo.io/$ip/country" 2>/dev/null || true)
             case "$country" in
             JP | KR | TW | HK | SG | TH | VN | MY | ID | PH | IN | AU | NZ) region="asia" ;;
             US | CA | GB | DE | FR | NL | ES | IT | PL | CZ | SE | NO | FI | CH | AT | BE | IE | PT) region="overseas" ;;

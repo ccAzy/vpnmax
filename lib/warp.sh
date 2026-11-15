@@ -26,13 +26,13 @@ EOSUB
     if [ -f /etc/s-box/sbwpph ] && pgrep -f sbwpph >/dev/null; then
         ok "WARP-plus-Socks5 已安装并运行"
     elif [ -f /etc/s-box/sbwpph ]; then
-        warn "WARP 文件存在但进程未运行，尝试: sb → 14 → 1"
-    else warn "WARP 安装失败（不影响核心代理功能，域名分流不可用）"; fi
+        note "WARP 文件存在但进程未运行，尝试: sb → 14 → 1"
+    else note "WARP 安装失败（不影响核心代理功能，域名分流不可用）"; fi
 }
 
 setup_domain_routing() {
     if [ ! -f /etc/s-box/sbwpph ] || ! pgrep -f sbwpph >/dev/null; then
-        warn "WARP 未运行，跳过域名分流"
+        note "WARP 未运行，跳过域名分流"
         return 0
     fi
     info "配置域名分流（WARP-socks5-ipv4 优先）..."
@@ -54,7 +54,7 @@ EOSUB
     CHECK=$(grep -c 'openai.com' /etc/s-box/sb.json 2>/dev/null || true)
     if [ "${CHECK:-0}" -gt 0 ]; then
         ok "域名分流已配置，AI + 流媒体 + 搜索引擎走 WARP"
-    else warn "分流配置可能未完全生效，可稍后手动 sb → 5 检查"; fi
+    else note "分流配置可能未完全生效，可稍后手动 sb → 5 检查"; fi
 }
 
 fix_mport_dup() {

@@ -44,17 +44,28 @@ ensure_time_sync() {
         info "chrony 配置位于 $chrony_conf（非默认路径），请确认 chronyd 启动参数已指向该文件"
     fi
     timeout 15 chronyc makestep 2>/dev/null || timeout 15 ntpdate -u ntp.aliyun.com 2>/dev/null || true
-    sleep 2
-    if chronyc tracking 2>/dev/null | grep -q 'Leap status.*Normal'; then
-        ok "时间已同步（chrony Normal）"
+    # 等一段时间让 chronyd 选中源（makestep 后通常 2~10s 完成）
+    local _i _synced=0 _tracking=""
+    for _i in $(seq 1 8); do
+        _tracking=$(chronyc tracking 2>/dev/null || true)
+        # 判据必须同时看两个：
+        #   ① Leap status Normal —— 只说明「没有闰秒事件」，不代表已同步
+        #   ② Reference ID 不以 '.' 开头 —— '.' 前缀是 chrony 的「尚未选中源」标记
+        # 旧写法只看 ①，于是在完全没同步时也报「已同步」，紧接着又打一行
+        # timedatectl「synchronized: no」，自己打自己。
+        # 时间没同步 Reality/VMess 会因 bad timestamp 握手失败，这行必须准。
+        if printf '%s' "$_tracking" | grep -qE 'Leap status *: *Normal' &&
+           ! printf '%s' "$_tracking" | grep -qE 'Reference ID *: *\.'; then
+            _synced=1; break
+        fi
+        timedatectl 2>/dev/null | grep -q 'System clock synchronized: yes' && { _synced=1; break; }
+        sleep 2
+    done
+    if [ "$_synced" = 1 ]; then
+        ok "系统时间已同步（chrony 已选中源）"
     else
-        chronyc tracking 2>&1 | head -5 || true
-        warn "chrony 尚未 Normal，稍后将自动追上（已设 makestep 1 3）"
-    fi
-    if timedatectl 2>/dev/null | grep -q 'System clock synchronized: yes'; then
-        ok "System clock synchronized: yes"
-    else
-        info "timedatectl: $(timedatectl 2>/dev/null | grep -E 'synchronized|NTP' | tr '\n' ';')"
+        warn "系统时间尚未同步——Reality/VMess 会因时间戳偏差握手失败；稍后自动重试，或手动: chronyc makestep"
+        printf '%s\n' "$_tracking" | grep -E 'Leap status|Reference ID|System time' | head -3 | sed 's/^/     /' || true
     fi
     manifest "time sync ensured via chrony ($chrony_conf)"
 }

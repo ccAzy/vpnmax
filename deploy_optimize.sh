@@ -107,13 +107,6 @@ fi
 
 # dry-run 包装：--dry-run 时不执行副作用命令
 
-step() {
-    echo ""
-    echo -e "${YELLOW}╔══════════════════════════════════════════════════╗${N}"
-    echo -e "${YELLOW}║  [$1] $2"
-    echo -e "${YELLOW}╚══════════════════════════════════════════════════╝${N}"
-}
-
 # ── 环境预检 ──
 check_env() {
     local fail_flag=0
@@ -178,7 +171,8 @@ EOF
             exit 0
         fi
     else
-        warn "标记文件存在，但当前运行的内核不是 BBRv3 —— 多半是已装好还没重启；本次会确认内核并重启"
+        # 这是「已装好但还没重启」的正常中间态，不是需要处理的问题
+        note "标记文件存在，但当前运行的内核不是 BBRv3 —— 已装好尚未重启；本次会确认内核并重启"
         if $DRY_RUN; then
             info "[dry-run] 删除失效优化标记: $MARK"
         else
@@ -269,6 +263,8 @@ EOF
     printf '  VPNMAX 服务器优化 · lib REV %s\n' "${VPNMAX_LIB_REV:-?}"
 }
 logo
+_DEPLOY_T0=$SECONDS
+_STEP_T0=$_DEPLOY_T0
 
 # check_env/install_dependencies 已在依赖阶段完成，这里不重复执行。
 
@@ -322,9 +318,11 @@ if $BBR_OK; then
     step "4" "重启生效"
     echo ""
     if $NO_REBOOT || $DRY_RUN; then
-        info "已跳过自动重启 (--no-reboot/--dry-run)"
-        info "请稍后手动执行: reboot"
-        info "重启后执行第 2 步: curl -fsSL .../deploy_singbox.sh | bash"
+        step_elapsed
+        echo ""
+        ok "服务器优化已应用（BBRv3 内核需重启生效），用时 $((SECONDS - _DEPLOY_T0))s"
+        summary_warnings
+        info "下一步: reboot   →   重启后跑 bash deploy_singbox.sh"
         exit 0
     fi
     for i in $(seq 10 -1 1); do
@@ -336,7 +334,9 @@ if $BBR_OK; then
     reboot
 else
     echo ""
+    step_elapsed
     warn "BBRv3 内核未安装成功，未写优化标记、未重启"
+    summary_warnings
     info "网络优化已应用（重启后仍生效，但 BBRv3 需要内核安装成功）"
     info "修复后重新执行: bash deploy_optimize.sh"
     exit 1
