@@ -469,7 +469,12 @@ if [ -f /etc/s-box/subport.log ] && [ -f /etc/s-box/subtoken.log ]; then
     ok "订阅端口: $SUBPORT"
     if [ -n "$SERVER_IP" ]; then
         for fmt in clmi.yaml sbox.json jhsub.txt; do
-            HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 "http://${SERVER_IP}:${SUBPORT}/${SUBTOKEN}/${fmt}" 2>/dev/null || echo "000")
+            # token 可能为空（sb 未生成 token 时订阅路径是 /<file>），不能硬拼出 //
+            _sp="/${fmt}"
+            [ -n "$SUBTOKEN" ] && _sp="/${SUBTOKEN}/${fmt}"
+            HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10                 "http://${SERVER_IP}:${SUBPORT}${_sp}" 2>/dev/null)
+            # curl 失败时 %{http_code} 会输出 000；不要再 `|| echo 000`（会把两个 000 粘成 000000）
+            [ -z "$HTTP_CODE" ] && HTTP_CODE=000
             if [ "$HTTP_CODE" = "200" ]; then
                 ok "$fmt 可访问 (HTTP 200)"
                 PASS=$((PASS + 1))
@@ -481,7 +486,10 @@ if [ -f /etc/s-box/subport.log ] && [ -f /etc/s-box/subtoken.log ]; then
     else
         LOCAL_HTTP=000
         for fmt in clmi.yaml sbox.json jhsub.txt; do
-            LOCAL_HTTP=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 5 "http://127.0.0.1:${SUBPORT}/${SUBTOKEN}/${fmt}" 2>/dev/null || echo "000")
+            _sp="/${fmt}"
+            [ -n "$SUBTOKEN" ] && _sp="/${SUBTOKEN}/${fmt}"
+            LOCAL_HTTP=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 5                 "http://127.0.0.1:${SUBPORT}${_sp}" 2>/dev/null)
+            [ -z "$LOCAL_HTTP" ] && LOCAL_HTTP=000
             [ "$LOCAL_HTTP" = "200" ] && {
                 ok "$fmt 本机可访问 (HTTP 200)"
                 break
@@ -490,6 +498,21 @@ if [ -f /etc/s-box/subport.log ] && [ -f /etc/s-box/subtoken.log ]; then
         if [ "$LOCAL_HTTP" = "200" ]; then PASS=$((PASS + 1)); else
             fail "订阅服务未响应（本机 HTTP $LOCAL_HTTP）— 检查 busybox httpd"
             FAIL=$((FAIL + 1))
+        fi
+
+        # 订阅「能访问」不等于「内容可用」：sb 的订阅生成在某些菜单路径下会产出
+        # port/uuid 全空的配置（链接形如 vless://@1.2.3.4:?），HTTP 照样 200。
+        # 这里直接查内容里有没有空字段，避免「订阅打得开但导入后连不上」的假绿灯。
+        if [ -f /etc/s-box/clmi.yaml ]; then
+            _empty=$(grep -nE "^\s*(port|uuid):\s*$" /etc/s-box/clmi.yaml 2>/dev/null | head -3 || true)
+            _badlink=$(grep -cE "://@?[0-9a-fA-F.:]*:\?" /etc/s-box/jhsub.txt 2>/dev/null || echo 0)
+            if [ -n "$_empty" ] || [ "${_badlink:-0}" -gt 0 ]; then
+                fail "订阅内容有空字段（clmi 空 port/uuid=${_empty:-无}；jhsub 残缺链接=${_badlink} 条）"
+                warn "现象：订阅能打开，但导入客户端后节点无端口/UUID，连不上。重跑 deploy_singbox.sh --force 或手动 sb → 3 → 8 → 1 重新生成"
+            else
+                ok "订阅内容完整（port/uuid 非空，链接无残缺）"
+                PASS=$((PASS + 1))
+            fi
         fi
     fi
 else
