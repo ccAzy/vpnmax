@@ -75,6 +75,31 @@ for _b in /usr/bin/sing-box /usr/local/bin/sing-box /etc/s-box/sing-box; do [ -x
     break
 }; done
 check "sing-box 二进制" [ -n "$SB_BIN" ]
+
+# sing-box 内核版本与 sb.sh 生成的配置格式是成对的：1.14 起删除了旧 DNS server 格式，
+# 而本项目 vendor/sb.sh 生成的是旧格式。手动用 sb 菜单升级过内核的机器会在这里暴露。
+if [ -n "$SB_BIN" ]; then
+    _SB_VER=$("$SB_BIN" version 2>/dev/null | awk '/version/{print $NF; exit}' 2>/dev/null || true)
+    if [ -n "${_SB_VER:-}" ]; then
+        _sb_major=${_SB_VER%%.*}
+        _sb_rest=${_SB_VER#*.}
+        _sb_minor=${_sb_rest%%.*}
+        case "${_sb_major}${_sb_minor}" in
+        '' | *[!0-9]*) warn "sing-box 版本号无法解析（$_SB_VER），跳过配对校验" ;;
+        *)
+            if [ "$_sb_major" -gt 1 ] || { [ "$_sb_major" -eq 1 ] && [ "$_sb_minor" -gt 13 ]; }; then
+                fail "sing-box 内核 ${_SB_VER} 与 sb.sh 配置格式不兼容（1.14 起删除旧 DNS server 格式）"
+                warn "节点大概率起不来：把 VPNMAX_SINGBOX_PIN 调回 1.13.x，或同批升级 vendor/sb.sh"
+            else
+                ok "sing-box 内核 ${_SB_VER} 与 sb.sh 配置格式匹配（≤1.13）"
+                PASS=$((PASS + 1))
+            fi
+            ;;
+        esac
+    else
+        warn "读不到 sing-box 版本，跳过配对校验"
+    fi
+fi
 check "/etc/s-box 目录" [ -d /etc/s-box ]
 
 if command -v modinfo >/dev/null 2>&1; then

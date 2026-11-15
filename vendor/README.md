@@ -59,12 +59,20 @@
 
 | 依赖 | 现值 | 说明 |
 |---|---|---|
-| sing-box 内核 | `1.13.19` | `VPNMAX_SINGBOX_PIN`；这是本项目已验证过的版本 |
+| sing-box 内核 | `1.13.19` | `VPNMAX_SINGBOX_PIN`；这是本项目已验证过的版本。**与 sb.sh 成对，不可单独升** |
 | cloudflared | `2026.8.3` | `VPNMAX_CLOUDFLARED_PIN`；与 `verify.sh` 的 G6 断言一致 |
 | cfst（CloudflareSpeedTest） | `v2.3.5` | `CFST_PIN`（在 `vendor/sb.sh` 内部使用） |
 
-三者的取法都是 **pin 优先 → 拉取失败时告警并回退 latest**（避免 pin 失效导致整个安装或优选卡死）。
-升级 = 改常量，是一次有意识的动作。
+取法分两类，差别来自「失效的代价是否对称」：
+
+| 依赖 | pin 拉取失败时 | 为什么 |
+| --- | --- | --- |
+| **sing-box 内核** | **直接失败退出**（不再回退 latest） | 它与 `sb.sh` 的配置格式成对（见上一节）。回退 latest 会装出「新内核 + 旧配置」，服务起不来；宁可失败也不要装一个坏节点 |
+| `cloudflared`、`cfst` | 告警后回退 latest | 二者是"活水"二进制：命令行为向后兼容，且不生成配置，回退的代价远小于装不上的代价 |
+
+升级 = 改常量，是一次有意识的动作。**改 `vendor/` 下的文件时还要 bump `VPNMAX_LIB_REV`**
+（`lib/boot.sh`）—— 服务器上缓存着旧 vendor 时，只改 `SB_SHA256` 不会触发刷新，
+反而会让「哈希校验失败 → 拒绝安装」变成死循环。
 
 ## 四、已移除的上游引用
 

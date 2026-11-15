@@ -1,5 +1,63 @@
 # Changelog
 
+## 2026-09-23 — 继续收口上游风险：补丁覆盖前置检查 + 拒绝「回退 latest」
+
+接上一轮巡检的三条建议，把「能拦住复发」的部分补上。
+
+### ① CI：缺内核补丁时 30 秒内失败，而不是 1.5 小时后
+
+`preflight` 原本没有 checkout，看不到 `patches/`。现在加了 `actions/checkout` +
+「检查 BBRv3 补丁是否覆盖目标内核系列」一步：
+
+```
+kernel.org 最新稳定版 = 7.3.4  →  series = 7.3
+patches/bbrv3-linux-7.3.patch 不存在 → ::error 并 exit 1
+```
+
+**为什么必须前置失败**：`apply-bbrv3-port.sh` 在没有对应补丁时会「取最新可用的旧补丁 +
+`patch --fuzz=3`」。旧补丁往新内核上打，可能偏移应用、可能失败、也可能打偏了却编译通过 ——
+那是运气不是正确性。在这里失败，比构建一小时后才炸好得多。
+
+### ② `vendor/sb.sh`：删除「pin 拉取失败 → 回退 latest」
+
+上一轮只在部署侧加了 `assert_singbox_core_compat` 守卫（装完再查）。但更好的位置是**根本别装**：
+
+```diff
+- red "pin 版拉取失败，回退上游 latest"
+- sbcore=$(curl ... releases/latest ...)      # 会装出 1.14 内核 + 1.13 配置
++ red "已拒绝自动回退 latest：1.14+ 内核不接受本脚本生成的 DNS 配置格式"
++ exit 1
+```
+
+`cloudflared` / `cfst` 的「pin 失败回退 latest」**保留**——它们是活水二进制，命令行为向后兼容、
+也不生成配置，回退的代价远小于装不上。差别来自「失效的代价是否对称」，已写进 `vendor/README.md`。
+
+### ③ `verify.sh`：手动升级内核的机器也能被查出来
+
+`assert_singbox_core_compat` 只在部署流程里跑。如果有人用 `sb` 菜单（`1`）单独升级了内核，
+部署侧看不到。现在 `verify.sh` 在确定 `SB_BIN` 之后也做一次配对校验，> 1.13 直接判失败。
+
+### ④ 连带修正：改 `vendor/` 必须 bump `VPNMAX_LIB_REV`
+
+`vpnmax_refresh_if_stale` 的版本戳本来**同时覆盖 lib 与 vendor 缓存**，但文档只写了「改 lib 必 bump」。
+如果只改 `SB_SHA256` 而不 bump rev，服务器上缓存的旧 `vendor/sb.sh` 不会被刷新，
+结果是「哈希校验失败 → 拒绝安装」的死循环。已在 `lib/boot.sh` 注释与 `vendor/README.md` 写明。
+
+**本轮版本联动**：`VPNMAX_LIB_REV` → `2026-09-23.9`；`BOOT_SHA256` 重算；
+`SB_SHA256` / `SB_ARGO_PATCHED_SHA256` 按新 `vendor/sb.sh` 重算并复核一致。
+
+**验证**
+
+| 项 | 结果 |
+| --- | --- |
+| `bash -n`（含 vendor/sb.sh） | 全通过 |
+| shellcheck（CI 同款） | clean |
+| R1–R7 门禁 | 全绿 |
+| vendor/sb.sh 改动前后 shellcheck 数量 | 32 → 32（未引入新问题） |
+| workflow YAML | 可解析；preflight 3 步 |
+| verify.sh 实跑（WSL） | 走完 51 行并给出汇总；新段落无 sing-box 时优雅跳过 |
+| 双哈希复核 | `SB_SHA256` / `SB_ARGO_PATCHED_SHA256` 与现文件一致 |
+
 ## 2026-09-23 — 上游巡检：补 7.3 内核补丁 + 修「内核/配置错配」隐患
 
 对全部上游做了一次巡检（`git ls-remote` + GitHub API + 逐条 URL 可达性），结论如下。

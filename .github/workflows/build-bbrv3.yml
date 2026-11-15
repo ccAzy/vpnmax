@@ -32,6 +32,12 @@ jobs:
       raw_kernel_version: ${{ steps.plan.outputs.raw_kernel_version }}
       build_needed: ${{ steps.plan.outputs.build_needed }}
     steps:
+      - name: 检出代码
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          # preflight 只需要读 patches/，不必拉全量历史
+          fetch-depth: 1
+
       - name: 检查最新内核和已发布版本
         id: plan
         run: |
@@ -76,6 +82,25 @@ jobs:
             echo "build_needed=true" >> "$GITHUB_OUTPUT"
             echo "At least one release for $version is missing; build will continue."
           fi
+
+      - name: 检查 BBRv3 补丁是否覆盖目标内核系列
+        # 为什么单独一步、且放在最前：apply-bbrv3-port.sh 在没有对应补丁时会
+        # 「取最新可用的旧补丁 + patch --fuzz=3」。旧补丁往新内核上打，可能偏移应用、
+        # 也可能失败，是典型的「能过就过了」的运气而不是正确性。
+        # 在这里 30 秒内失败，好过 1.5 小时构建后才发现。
+        run: |
+          set -euo pipefail
+          ver="${{ steps.plan.outputs.kernel_version }}"
+          series="$(echo "$ver" | cut -d. -f1,2)"
+          f="patches/bbrv3-linux-${series}.patch"
+          if [ ! -f "$f" ]; then
+            echo "::error file=${f}::kernel.org 最新稳定版是 ${ver}，但仓库缺少 ${f}"
+            echo "上游多半已经提供了对应补丁，取回来入仓后再跑：" >&2
+            echo "  https://github.com/byJoey/Actions-bbr-v3/tree/main/patches" >&2
+            echo "（不要依赖 apply-bbrv3-port.sh 的旧补丁 fuzz 兜底）" >&2
+            exit 1
+          fi
+          echo "补丁覆盖 ${series}：${f} 存在（内置兜底不会被触发）。"
 
   cleanup:
     needs: preflight

@@ -31,12 +31,12 @@ VPNMAX_VENDOR_FILES="sb.sh"
 # lib 版本戳：**每次改动 lib/ 就把它改掉**。服务器靠它判断要不要重拉已缓存的模块——
 # 旧逻辑只补缺失文件，缓存一旦落地就冻结，lib 的修复永远到不了线上（2026-09-23 连踩两次）。
 # 联动门禁见 tools/check-lib-integrity.py R7b（格式 + BOOT 自哈希 + 双哈希一致性）。
-VPNMAX_LIB_REV="2026-09-23.8"
+VPNMAX_LIB_REV="2026-09-23.9"
 
 # boot.sh 自哈希（归一化自哈希：把下一行的值置空后对本文件取 sha256）。
 # **每次改动 lib/boot.sh 都必须重算本常量**，否则 R7b 门禁失败拒绝安装。
 # 重算：sed 's/^BOOT_SHA256=".*"/BOOT_SHA256=""/' lib/boot.sh | sha256sum
-BOOT_SHA256="75749e503c4ef3d304f62b77bb49397dcd6ac76ea429e44e0ac056aec6d83ae4"
+BOOT_SHA256="0e6ad7f78b86a8b00971c1a1b21d1fa6ba6b2ad9246e642cb4a789a49c25ed33"
 
 # 远端源 allowlist（供应链 RCE 防线：VPNMAX_RAW 只能是自家源）。
 # vpnmax_fetch / 各入口自举下载前必经 vpnmax_raw_allowed()，命中失败即 fail-closed 中止。
@@ -137,6 +137,8 @@ vpnmax_bootstrap() {
 }
 
 # 版本戳不一致 → 丢弃缓存的 lib/vendor 并整体重拉。
+# 注意：**改 vendor/ 也要 bump VPNMAX_LIB_REV** —— 服务器上缓存着旧的 vendor/sb.sh 时，
+# 只改 SB_SHA256 不会触发刷新，反而会让「哈希校验失败 → 拒绝安装」变成死循环。
 # 只在用缓存（$VPNMAX_LIB_HOME）时才有意义；仓库模式（有本地 lib/）由 vpnmax_load 跳过。
 # --force 语义：强制重跑全流程时同样丢弃缓存重拉，保证 --force 真覆盖（2026-09-23 事故复盘）。
 vpnmax_refresh_if_stale() {

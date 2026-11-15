@@ -318,12 +318,15 @@ sbcore='1.10.7'
 fi
 sbname="sing-box-$sbcore-linux-$cpu"
 curl -fL -o /etc/s-box/sing-box.tar.gz  -# --retry 2 https://github.com/SagerNet/sing-box/releases/download/v$sbcore/$sbname.tar.gz
-# vpnmax: pin 版拉取失败（含 404）时告警并回退 latest，避免 pin 失效导致装不上
+# vpnmax: pin 版拉取失败时【拒绝】回退 latest。
+# 原因：本脚本生成的是 1.13 时代的旧 DNS server 格式，而 sing-box 1.14.0 已删除该格式。
+# 回退 latest 会得到「新内核 + 旧配置」→ 配置解析失败、服务起不来，且用户看到的是
+# 「安装成功」之后的一切都莫名其妙。宁可在这里明确失败，也不要装出一个起不来的节点。
 if [[ ! -s '/etc/s-box/sing-box.tar.gz' && -n "$VPNMAX_SINGBOX_PIN" && "$sbcore" = "$VPNMAX_SINGBOX_PIN" ]]; then
-red "pin 版 sing-box $sbcore 拉取失败，回退上游 latest（请核对 pin 是否仍存在）"
-sbcore=$(curl -Ls https://github.com/SagerNet/sing-box/releases/latest | grep -oP 'tag/v\K[0-9.]+' | head -n 1)
-sbname="sing-box-$sbcore-linux-$cpu"
-curl -fL -o /etc/s-box/sing-box.tar.gz  -# --retry 2 https://github.com/SagerNet/sing-box/releases/download/v$sbcore/$sbname.tar.gz
+red "pin 版 sing-box $sbcore 拉取失败（发布资产可能已失效，或被网络阻断）"
+red "已拒绝自动回退 latest：1.14+ 内核不接受本脚本生成的 DNS 配置格式，装上也起不来。"
+red "处理：①修正网络后重试；②或同批升级 VPNMAX_SINGBOX_PIN 与 vendor/sb.sh（见 vendor/README.md）"
+exit 1
 fi
 if [[ -s '/etc/s-box/sing-box.tar.gz' ]]; then
 tar xzf /etc/s-box/sing-box.tar.gz -C /etc/s-box
