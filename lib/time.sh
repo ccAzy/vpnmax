@@ -45,8 +45,10 @@ ensure_time_sync() {
     fi
     timeout 15 chronyc makestep 2>/dev/null || timeout 15 ntpdate -u ntp.aliyun.com 2>/dev/null || true
     # 等一段时间让 chronyd 选中源（makestep 后通常 2~10s 完成）
+    # 等 30s：全新机器上 chronyd 首次选中源通常要 20~40s，16s 会频繁误报
+    # 「尚未同步」——而这条警告会让人以为 Reality 要坏，假警报比不报更伤。
     local _i _synced=0 _tracking=""
-    for _i in $(seq 1 8); do
+    for _i in $(seq 1 15); do
         _tracking=$(chronyc tracking 2>/dev/null || true)
         # 判据必须同时看两个：
         #   ① Leap status Normal —— 只说明「没有闰秒事件」，不代表已同步

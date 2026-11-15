@@ -1,5 +1,53 @@
 # Changelog
 
+## 2026-09-23 — 安全性：未知参数不再被静默忽略（`deploy_optimize.sh --no-reboo` 会重启服务器）
+
+### 怎么发现的
+
+做边界测试时想验证「`--help` 有没有正确实现」，于是对每个脚本跑了一遍 `--bogus-flag`。
+**测试虚拟机当场 rebooting 并卡在 BBRv3 内核 panic 上，SSH 再也连不进去**——
+因为 `deploy_optimize.sh` 的 `case "$arg" in` 只有 `--no-reboot`/`--dry-run`/`--force`/
+`VERSION_PIN=*`/`--help` 五个分支，**没有 `*)` 兜底**：不认识参数就当作没传，
+继续按默认路径跑完整优化流程，末尾 `reboot`。
+
+也就是说：
+
+```bash
+bash deploy_optimize.sh --no-reboo     # 少打一个 t
+# → 完整优化 + 自动重启生产服务器
+```
+
+这不是显示问题，是**会让用户丢连接的操作**。
+
+### 修复
+
+`deploy_optimize.sh` / `deploy_singbox.sh` / `bootstrap.sh` 三个入口统一加兜底：
+
+```bash
+*) fail "未知参数: $arg（bash <script> --help）"; exit 2 ;;
+```
+
+实测：`--bogus-flag` → `exit=2` + 明确提示，不再执行任何动作；`--help` 仍正常。
+
+### 顺带两处降噪
+
+| 项 | 前 | 后 |
+| --- | --- | --- |
+| `上游未提供 SHA256SUMS（已知情况）` | `[!]` 需要注意 | `[i]` 常态提示 |
+| 时间同步等待 | 16s（全新机常误报「尚未同步」） | **30s**（chronyd 首次选中源要 20~40s） |
+
+时间那条尤其重要：判据本身已经修对了（Leap Normal **且** Reference ID 非 `.`），
+但等待太短会在健康机器上误报，而这条警告会让人以为 Reality 要坏。
+
+### 实测（恢复快照后重跑完整路径）
+
+```
+[1] bootstrap   EXIT=0
+[2] optimize    EXIT=0   核心警告 0 条
+[3] deploy      EXIT=0   [+] 全程无警告
+[4] verify      通过 37 / 失败 0
+```
+
 ## 2026-09-23 — 自主测试循环：修掉 6 个新问题（含 3 个「假绿灯」）
 
 按「修 → 测 → 修」循环跑了 11 轮，每轮都在真机虚拟机上实跑。发现的都不是语法错误，

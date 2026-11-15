@@ -129,7 +129,8 @@ install_bbrv3() {
             warn "SHA256 未通过比对（expected=${expected:-无} actual=${actual:-无}）—— 按既定策略继续安装"
         fi
     else
-        warn "上游未提供 SHA256SUMS（已知情况）—— 跳过校验，继续安装"
+        # 上游 release 确实不带校验文件，这是常态不是本次的问题
+        note "上游未提供 SHA256SUMS（常态）—— 跳过校验，继续安装"
     fi
     manifest "BBRv3 $pkg_name sha256=${actual:-unknown} url=$DOWNLOAD_URL"
 

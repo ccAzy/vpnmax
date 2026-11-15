@@ -79,6 +79,7 @@ vpnmax deploy_singbox.sh — sing-box 一键部署
 HELP
         exit 0
         ;;
+      *) fail "未知参数: $arg（bash deploy_singbox.sh --help）"; exit 2 ;;
     esac
 done
 

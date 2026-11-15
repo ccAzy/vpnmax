@@ -62,6 +62,7 @@ vpnmax bootstrap.sh — 环境准备与依赖检查
 HELP
         exit 0
         ;;
+      *) fail "未知参数: $arg（bash bootstrap.sh --help）"; exit 2 ;;
     esac
 done
 

@@ -78,6 +78,7 @@ vpnmax deploy_optimize.sh — 服务器暴力优化（BBRv3 + 网络极限压榨
 HELP
         exit 0
         ;;
+      *) fail "未知参数: $arg（bash deploy_optimize.sh --help）"; exit 2 ;;
     esac
 done
 
