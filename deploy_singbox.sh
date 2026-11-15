@@ -93,10 +93,10 @@ SB_COMMIT="5001e76efc9e15eac1f8ff33a0b389172e331e1d"
 #   ① acme.sh / CFwarp.sh / sbwpph 改为 pin commit + SHA256 校验（不再裸拉上游 main 后 root 执行）
 #   ② 版本 pin：sing-box 1.13.19 / cloudflared 2026.8.3 / cfst v2.3.5（pin 拉不到才告警回退 latest）
 #   ③ bbr() 改本地最小实现（不再拉 teddysun/across，避免覆盖本项目的 TCP buffer 调优）
-SB_SHA256="2205127712b8edc60b7cbbf75d3045579f4eaad6a9b37ecdd7ef4a7b95840aac"
+SB_SHA256="451c2dfb623641d2083c30eb050f039b46d3b4b6a5f99bf689ae5b964f736f29"
 # apply_argo_patch 只把 --protocol http2 改成 auto 后的精确哈希。
 # 只信任这两个当前版本哈希；旧 /etc/s-box/.sb-argo-patched.sha256 不再能“保活”历史 sb.sh。
-SB_ARGO_PATCHED_SHA256="f92e137041f8673c0e3e13aa2543c1f53b8e521ecd0ca187b0314695f23a9dd9"
+SB_ARGO_PATCHED_SHA256="5f939ffcd78e0b2e1b7a062d5aad23c29674da769ec10ae846850ec342027685"
 SB_URL="https://raw.githubusercontent.com/ccAzy/vpnmax/main/vendor/sb.sh"
 
 # ── 环境预检 + 第二阶段依赖兜底 ──

@@ -1,5 +1,60 @@
 # Changelog
 
+## 2026-09-23 — P0 修复：订阅全空（`sed 's://.*::g'` 会砍掉含 `//` 的 JSON 值）
+
+**真机虚拟机实测发现**：`sb.json` 完全正常，但 `clmi.yaml` 的 `port:`/`uuid:` 全空、
+`jhsub.txt` 的链接是 `vless://@1.2.3.4:?` —— 订阅能打开，导入客户端却连不上。
+而部署脚本打印"全部部署完成"，没有任何报错。
+
+### 根因（实测定位到具体字节）
+
+上游 `sb.sh` 有 **94 处**这样的管道：
+
+```bash
+uuid=$(sed 's://.*::g' /etc/s-box/sb.json | jq -r '...')
+```
+
+那个 sed 看起来像"去掉 `://` 后面的东西"，但因为分隔符用了 `:`，实际语义是
+**`s` + 分隔符`:` + 模式`//.*` + 分隔符`:` + 空替换 + `g`** —— 即
+**「从 `//` 删到行尾」**。
+
+平时 sb.json 里没有 `//`，这行什么也不做，所以一直没暴露。
+但 WARP 的 `private_key` 是 base64，**随机出现 `//` 的概率约 1%**：
+
+```json
+"private_key": "mBqPJvenCnL4/lPGyAPLQY4wg1qUjNmiyo//fRcu218=",
+```
+
+被砍成 `"private_key": "mBqPJvenCnL4/lPGyAPLQY4wg1qUjNmiyo` → JSON 断裂 →
+`jq` 报 `Invalid string: control characters` → 所有取值为空 →
+订阅生成出来全是空的。**整条链路静默失败。**
+
+### 修复
+
+`vendor/sb.sh` 94 处 `sed 's://.*::g' <file> | jq` → `cat <file> | jq`。
+语义等价（原本就是"把文件喂给 jq"），但不再破坏内容。
+
+配套：`SB_SHA256` / `SB_ARGO_PATCHED_SHA256` 重算，`VPNMAX_LIB_REV` → `2026-09-23.10`，
+`BOOT_SHA256` 重算（改 vendor 必须 bump，否则服务器缓存的旧 vendor 会让哈希校验失败）。
+
+### 实测验证（VirtualBox + Debian 12.15）
+
+| 项 | 修复前 | 修复后 |
+| --- | --- | --- |
+| `clmi.yaml` 的 port/uuid | 空（8 处） | `port: 48698` / `uuid: aa1e3633-...` |
+| `jhsub.txt` 链接 | `vless://@85.121.51.211:?` | `vless://aa1e3633-...@85.121.51.211:48698?...` |
+| `verify.sh` | 通过 29 / 失败 2 | **通过 33 / 失败 1**（仅 Argo，环境无 cloudflared） |
+
+### 顺带修掉 verify.sh 三处自身缺陷
+
+1. **假红灯**：订阅服务返回 200 却报「未响应（HTTP `502000`）」——token 为空时 URL 拼成
+   `//clmi.yaml`；且 `curl ... || echo "000"` 会把 502 和 000 粘成 `502000`。
+2. **假绿灯**：只查"能不能打开"，不查"内容对不对"——上面那个 P0 完全发现不了。
+   新增内容完整性检查（clmi 空 port/uuid、jhsub 残缺链接数）。
+3. **整数比较报错**：`grep -c ... || echo 0` 在无匹配时会输出两行 `0`（grep 自己已经打印了 0），
+   导致 `[: 0
+0: integer expression expected`。改为 `|| true` 再补默认值。
+
 ## 2026-09-23 — 继续收口上游风险：补丁覆盖前置检查 + 拒绝「回退 latest」
 
 接上一轮巡检的三条建议，把「能拦住复发」的部分补上。

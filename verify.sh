@@ -506,7 +506,9 @@ if [ -f /etc/s-box/subport.log ] && [ -f /etc/s-box/subtoken.log ]; then
     # 这里直接查内容里有没有空字段，避免「订阅打得开但导入后连不上」的假绿灯。
     if [ -f /etc/s-box/clmi.yaml ]; then
         _empty=$(grep -nE "^\s*(port|uuid):\s*$" /etc/s-box/clmi.yaml 2>/dev/null | head -3 || true)
-        _badlink=$(grep -cE "://@?[0-9a-fA-F.:]*:\?" /etc/s-box/jhsub.txt 2>/dev/null || echo 0)
+        # grep -c 无匹配时会打印 0 但返回 1；不要再接 || echo 0，否则会输出两行 0 导致整数比较报错
+        _badlink=$(grep -cE "://@?[0-9a-fA-F.:]*:\\?" /etc/s-box/jhsub.txt 2>/dev/null || true)
+        _badlink=${_badlink:-0}
         if [ -n "$_empty" ] || [ "${_badlink:-0}" -gt 0 ]; then
             fail "订阅内容有空字段（clmi 空 port/uuid=${_empty:-无}；jhsub 残缺链接=${_badlink} 条）"
             warn "现象：订阅能打开，但导入客户端后节点无端口/UUID，连不上。重跑 deploy_singbox.sh --force 或手动 sb → 3 → 8 → 1 重新生成"
