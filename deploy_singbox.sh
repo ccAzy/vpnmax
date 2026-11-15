@@ -71,8 +71,8 @@ vpnmax deploy_singbox.sh — sing-box 一键部署
 
 参数: bash deploy_singbox.sh [--dry-run] [--reset-sub] [--force]
   --dry-run  只打印将执行的动作，不实际修改系统
-  --reset-sub 强制轮转订阅（删除旧 subport/subtoken，生成全新 token/端口）
-             等价 RESET_SUB=1 bash deploy_singbox.sh，暴露后一键换链
+    --reset-sub 订阅外泄后一键换链：轮转订阅端口，旧链接立刻打不开
+              （token 即节点 UUID，不随本选项改变；要换 UUID 请在 sb 里重新生成节点）
   --force    强制重跑全流程（忽略 /etc/.vpnmax-singbox 已部署标记，强制对齐 sb.json/iptables/订阅三处）
   VMESS_LOCK=on|off  明文 VMess 端口是否封锁公网（默认 off：直连，仅密钥登录无防火墙场景）
   RESET_SUB=1        同 --reset-sub

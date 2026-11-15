@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026-09-23 — `--reset-sub` 的说明书说了它做不到的事
+
+实测 `deploy_singbox.sh --reset-sub`：
+
+| 项 | 结果 |
+| --- | --- |
+| 订阅端口 | 48245 → **42051**（旧链接立刻打不开） |
+| token | **没变**——它就是节点 UUID，删 `subtoken.log` 不会让它变 |
+| 旧端口是否还在监听 | 否（httpd 已在新端口） |
+
+功能上够用（泄漏的 URL 含旧端口，已经死了），但 help 写的是
+「删除旧 subport/subtoken，生成全新 **token**/端口」——**说了做不到的事**。
+用户按字面理解会以为 UUID 也换了，于是在别处继续用旧 UUID 排查，白折腾。
+
+改为如实描述：
+
+```
+--reset-sub 订阅外泄后一键换链：轮转订阅端口，旧链接立刻打不开
+            （token 即节点 UUID，不随本选项改变；要换 UUID 请在 sb 里重新生成节点）
+```
+
+代码里也补了注释说明为什么删日志不会换 token。
+
+### 顺带确认：`verify.sh` 在未部署机器上不崩
+
+临时移走 `/etc/s-box` + 停掉 sing-box 后跑 verify：
+
+```
+[x]   sing-box 二进制
+[x]   /etc/s-box 目录
+[!]   tcp_bbr 为主线 BBRv1（未启用 BBRv3 内核，先执行 deploy_optimize.sh）
+```
+
+有明确的红灯和指引，没有 `command not found` / `unbound variable` / 语法错误。
+
 ## 2026-09-23 — 安全性：未知参数不再被静默忽略（`deploy_optimize.sh --no-reboo` 会重启服务器）
 
 ### 怎么发现的

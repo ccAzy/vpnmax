@@ -26,17 +26,22 @@ ensure_sub_perms() {
 setup_subscription() {
     info "配置本地订阅链接..."
     sleep 1
-    # RESET_SUB=1 / --reset-sub：暴露后一键轮转（删旧 token/端口，强制全新）
+    # RESET_SUB=1 / --reset-sub：暴露后一键轮转。
+    # 实测说明：能轮转的是**订阅端口**（旧链接里的 :端口 立刻失效）；
+    # token 就是节点 UUID，由 sb.json 决定，删 subtoken.log 不会让它变——
+    # 要换 UUID 必须在 sb 里重新生成节点（sb → 3 → 1），代价是全部客户端重配。
+    # 对「链接外泄」这个场景，换端口已经足够：泄漏的旧 URL 打不开了。
     if [ "${RESET_SUB:-0}" = "1" ] || [ "${RESET_SUB:-}" = "true" ]; then
         if $DRY_RUN; then
-            info "[dry-run] RESET_SUB=1 将删除旧订阅并生成全新 token/端口"
+            info "[dry-run] RESET_SUB=1 将删除旧订阅并重新生成（端口轮转，token=节点 UUID 不变）"
         else
-            info "RESET_SUB=1 检测到，清理旧订阅（旧链接将失效）..."
+            info "RESET_SUB=1 检测到，清理旧订阅（旧链接里的端口将失效）..."
             rm -f /etc/s-box/subport.log /etc/s-box/subtoken.log 2>/dev/null || true
             rm -rf /root/websbox/* 2>/dev/null || true
             # 同步清理旧 sb 生成的聚合文件，避免残留
             rm -f /etc/s-box/jhsub.txt /etc/s-box/jhdy.txt 2>/dev/null || true
-            ok "旧订阅已清理，下一步将生成全新 token/端口"
+            # token 是节点 UUID，删日志不会变——如实说明，别让用户以为 UUID 也换了
+            ok "旧订阅已清理；下一步生成新端口（token 仍为节点 UUID，需要换 UUID 请用 sb → 3 → 1）"
         fi
     fi
     # 端口稳定性：重跑时复用已有订阅端口，避免每次随机导致客户端订阅地址作废
