@@ -395,7 +395,10 @@ curl -v http://127.0.0.1:订阅端口/token/clmi.yaml
     期间修掉的缺陷见 `CHANGELOG.md`（订阅全空、时间假绿灯、cleanup 中途退出、verify 漏进程、并发无互斥等）。
   - **Ubuntu 22.04：真机实测** —— 第 1 步（内核安装 / 网络调优 / GRUB 默认项 / 自动重启）
     在 QQ、QQ2 两台真机多次跑通（含慢速链路断点续传）。
-  - **仍未实机验证**：Ubuntu 24.x、arm64、BBRv3 内核**启动**（虚拟机虚拟 APIC 下会 panic，只有真机能验），
+  - **Ubuntu（CI smoke job，ubuntu-latest）** —— 四个入口 `--dry-run` 全部 exit 0、
+    dry-run 契约（前后快照一致）成立、`verify.sh` 在未部署机器上结构化报错且不崩。
+    这是 CI 每次提交都跑的部分，**不包含真实部署**。
+  - **仍未实机验证**：arm64、BBRv3 内核**启动**（虚拟机虚拟 APIC 下会 panic，只有真机能验），
     以及需要外网的 Argo / WARP 完整链路。
 
 ---
