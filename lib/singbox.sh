@@ -84,6 +84,40 @@ fetch_sb_sh() { # $1=输出路径
     [ -s "$out" ]
 }
 
+# sb.sh 生成的配置格式与 sing-box 内核版本是**成对**的：
+#   sb.sh@5001e76 生成 1.13 时代的旧 DNS server 格式（"type":"https" + server + path）
+#   sing-box 1.14.0 已**删除**旧 DNS server 格式 → 内核升上去而 sb.sh 没升 = 配置解析失败、服务起不来
+# pool 里 sb.sh 有一条「pin 拉取失败 → 回退 latest」的路径，会打破这个配对，所以这里做显式守卫。
+# 升级时两件事必须同批做：VPNMAX_SINGBOX_PIN 与 vendor/sb.sh（见 vendor/README.md）
+SINGBOX_COMPAT_MINOR=13
+
+assert_singbox_core_compat() {
+    local bin="/etc/s-box/sing-box" ver major minor rest
+    if [ ! -x "$bin" ]; then
+        warn "未找到 $bin，跳过内核版本配对校验"
+        return 0
+    fi
+    ver=$("$bin" version 2>/dev/null | awk '/version/{print $NF; exit}' || true)
+    if [ -z "$ver" ]; then
+        warn "读不到 sing-box 版本，跳过配对校验"
+        return 0
+    fi
+    major=${ver%%.*}
+    rest=${ver#*.}
+    minor=${rest%%.*}
+    case "$major$minor" in
+    '' | *[!0-9]*) warn "sing-box 版本号无法解析（$ver），跳过配对校验" && return 0 ;;
+    esac
+    if [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -gt "$SINGBOX_COMPAT_MINOR" ]; }; then
+        fail "sing-box 内核 $ver 与当前 sb.sh 的配置格式不兼容（1.14 起删除了旧 DNS server 格式）"
+        warn "这样装出来的节点会因为配置解析失败而起不来。二选一："
+        warn "  a) 把 VPNMAX_SINGBOX_PIN 调回 1.13.x 后重跑（推荐，保持冻结层）"
+        warn "  b) 整体升级 vendor/sb.sh + 内核版本，两者必须同批改（见 vendor/README.md）"
+        return 1
+    fi
+    ok "sing-box 内核 $ver 与 sb.sh 配置格式匹配（≤1.$SINGBOX_COMPAT_MINOR）"
+}
+
 install_singbox_yg() {
     if ! ${FORCE:-false} && command -v sb &>/dev/null && [ -f /etc/s-box/sb.json ]; then
         ok "sing-box-yg 已安装，跳过（--force 覆盖）"

@@ -240,6 +240,8 @@ EOF
 
     step "1" "安装 sing-box"
     install_singbox_yg || DEPLOY_OK=false
+    # 内核版本必须与 sb.sh 的配置格式配对（1.14 删了旧 DNS 格式），不匹配就不许写成功标记
+    assert_singbox_core_compat || DEPLOY_OK=false
     apply_argo_patch
 
     step "2" "配置订阅链接"
