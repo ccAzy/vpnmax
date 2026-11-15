@@ -488,7 +488,8 @@ if [ -f /etc/s-box/subport.log ] && [ -f /etc/s-box/subtoken.log ]; then
         for fmt in clmi.yaml sbox.json jhsub.txt; do
             _sp="/${fmt}"
             [ -n "$SUBTOKEN" ] && _sp="/${SUBTOKEN}/${fmt}"
-            LOCAL_HTTP=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 5                 "http://127.0.0.1:${SUBPORT}${_sp}" 2>/dev/null)
+            # --noproxy：本机回环不能被 http_proxy 送进代理（否则测的是代理不是服务）
+            LOCAL_HTTP=$(curl -s --noproxy '*' -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 5 "http://127.0.0.1:${SUBPORT}${_sp}" 2>/dev/null)
             [ -z "$LOCAL_HTTP" ] && LOCAL_HTTP=000
             [ "$LOCAL_HTTP" = "200" ] && {
                 ok "$fmt 本机可访问 (HTTP 200)"

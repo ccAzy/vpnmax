@@ -109,11 +109,10 @@ wait_subscription() {
     done
     if [ -n "$SUB_PORT" ]; then
         ok "订阅端口: $SUB_PORT"
-        if curl -fsL --max-time 5 -o /dev/null "http://127.0.0.1:$SUB_PORT/" 2>/dev/null; then
-            ok "订阅服务 HTTP 响应正常"
-        else
-            warn "端口 $SUB_PORT 暂未响应 HTTP"
-        fi
+        # 这里只确认「端口已监听」。不在这里判 HTTP 是否 200：sbshare 生成
+        # clmi.yaml 比监听端口晚得多（实测 >10s），此时查必然 404——而部署末尾
+        # 就绪状态本来就要再查一次，同类检查做两遍只会多出一个假警告。
+        info "订阅内容仍在生成，就绪状态在部署末尾统一确认"
     else
         warn "订阅服务超时未启动（已等 60s）"
     fi
@@ -164,6 +163,37 @@ ensure_sub_httpd() {
     fi
 }
 
+# 节点一览：上游 sb 每次调用都刷一遍的节点摘要已被 sbfeed 过滤器折叠，
+# 这里用自己的数据（sb.json）重新打一张紧凑表，端口/sni 一目了然。
+show_nodes() {
+    [ -f /etc/s-box/sb.json ] || return 0
+    local rows
+    rows=$(jq -r '.inbounds[]?
+        | select(.type=="vless" or .type=="vmess" or .type=="hysteria2" or .type=="tuic" or .type=="anytls")
+        | [.type, (.listen_port // .port // 0 | tostring), (.tls.server_name // "-")] | @tsv' \
+        /etc/s-box/sb.json 2>/dev/null) || true
+    [ -n "$rows" ] || return 0
+    echo ""
+    info "━━━ 节点 ━━━"
+    printf '%s\n' "$rows" | awk -F'\t' '
+        { name = $1; if (name == "hysteria2") name = "hy2"; if (name == "vmess") name = "vmess-ws"
+          printf "  %-12s %-7s %s\n", name, $2, ($3 == "-" ? "" : "sni=" $3) }'
+}
+
+# 订阅里实际写入的 server 字段——链接与告警的唯一真相源。
+# 为什么不能各取各的：clmi.yaml 的 server 由 sbshare 生成，而出口 IP 是现查的，
+# 两者可能不同步（sbshare 超时/没跑完）——就会出现「告警说还是 IPv6、
+# 下面链接却全是 IPv4」这种自相矛盾，用户会当成故障。
+sub_server_ip() {
+    local v=""
+    v=$(grep -m1 -E '^[[:space:]]*server:[[:space:]]*' /etc/s-box/clmi.yaml 2>/dev/null \
+        | sed 's/^[[:space:]]*server:[[:space:]]*//' | tr -d '"[:space:]' || true)
+    if [ -n "$v" ]; then printf '%s\n' "$v"; return 0; fi
+    curl -fsSL --max-time 5 https://api.ipify.org 2>/dev/null ||
+        curl -fsSL --max-time 5 https://icanhazip.com 2>/dev/null ||
+        echo "你的服务器IP"
+}
+
 show_subscription() {
     local sub_port token public_ip
     sub_port=$(get_sub_port 2>/dev/null || true)
@@ -176,11 +206,23 @@ show_subscription() {
         warn "订阅端口/token 未通过白名单校验（port=[0-9]/1024-65535，token=8-64位字母数字/_/-），拒绝拼链接"
         return 1
     fi
-    public_ip=$(curl -fsSL --max-time 5 https://api.ipify.org 2>/dev/null ||
-        curl -fsSL --max-time 5 https://icanhazip.com 2>/dev/null ||
-        echo "你的服务器IP")
-    echo ""
-    info "━━━ 订阅链接 ━━━"
+    public_ip=$(sub_server_ip 2>/dev/null || true)
+    [ -n "$public_ip" ] || public_ip="你的服务器IP"
+        # 末尾就绪确认：链接印出去之前先真打一次，200 就说 200，
+        # 不是 200 就如实告警（此时已过完全部步骤，再不到就是真问题）。
+        local _code="000" _i
+        for _i in $(seq 1 5); do
+            # --noproxy：用户机器上常残留 http_proxy，连 127.0.0.1 也会被送去代理
+            # （实测本机自检返回 502），本机检查必须绕开代理
+            _code=$(curl -s --noproxy '*' -o /dev/null -w '%{http_code}' --max-time 3 \
+                "http://127.0.0.1:${sub_port}/${token}/clmi.yaml" 2>/dev/null || echo 000)
+            [ "$_code" = "200" ] && break
+            sleep 1
+        done
+        if [ "$_code" = "200" ]; then ok "订阅服务就绪（本机 HTTP 200）"
+        else warn "订阅端口 ${sub_port} 返回 HTTP ${_code}，客户端可能导入失败：检查 ss -tlnp | grep ${sub_port}"; fi
+        echo ""
+        info "━━━ 订阅链接 ━━━"
     echo ""
     echo "Clash / Mihomo:"
     echo "http://${public_ip}:${sub_port}/${token}/clmi.yaml"

@@ -237,6 +237,8 @@ EOF
         return 0
     fi
     local DEPLOY_OK=true
+    local _DEPLOY_T0=$SECONDS
+    _STEP_T0=$_DEPLOY_T0
 
     step "1" "安装 sing-box"
     install_singbox_yg || DEPLOY_OK=false
@@ -268,7 +270,6 @@ EOF
     setup_domain_routing
     force_ipv4_lock || true
     fix_mport_dup || true
-    show_subscription || true
 
     step "7" "日志轮转 + 基线体检（可选）"
     setup_logrotate
@@ -277,9 +278,20 @@ EOF
     if $DEPLOY_OK; then
         run touch "$CHECKPOINT"
         manifest "deploy core OK; vmess_lock=${VMESS_LOCK}"
-        ok "全部部署完成！"
-        info "管理命令: sb"
+        step_elapsed
+        echo ""
+        # 订阅链接放在最末尾：这是用户真正要复制走的东西，
+        # 放到中间会被后续步骤的输出推到屏幕外
+        show_nodes || true
+        show_subscription || true
+        echo ""
+        ok "全部部署完成！用时 $((SECONDS - _DEPLOY_T0))s"
+        summary_warnings
+        info "管理命令: sb   ｜  体检: bash verify.sh"
     else
+        step_elapsed
+        echo ""
+        summary_warnings
         warn "核心步骤未完全成功，未写成功标记"
         info "修复后重试: bash deploy_singbox.sh"
         return 1
@@ -287,10 +299,36 @@ EOF
 }
 
 step() {
+    step_elapsed
     echo ""
     echo -e "${YELLOW}╔══════════════════════════════════════════════════╗${N}"
     echo -e "${YELLOW}║  [$1] $2"
     echo -e "${YELLOW}╚══════════════════════════════════════════════════╝${N}"
+    _STEP_T0=$SECONDS
+    _STEP_LABEL="[$1] $2"
+}
+
+# 打印上一步耗时。部署全程 4~6 分钟，中间没有心跳的话，卡住和正常等待
+# 对用户长得一模一样——只能干盯着屏幕猜。
+step_elapsed() {
+    [ -n "${_STEP_T0:-}" ] && [ -n "${_STEP_LABEL:-}" ] && \
+        printf '        └─ %s 用时 %ds\n' "$_STEP_LABEL" "$((SECONDS - _STEP_T0))"
+    return 0
+}
+
+# 收尾汇总：几百行输出里的 [!] 会被忽略，这里重列一遍
+summary_warnings() {
+    local n=${#VPNMAX_WARNINGS[@]}
+    if [ "$n" -eq 0 ]; then
+        ok "全程无警告"
+        return 0
+    fi
+    echo ""
+    info "━━━ 需要注意（$n 条）━━━"
+    local w
+    for w in "${VPNMAX_WARNINGS[@]}"; do printf '     - %s\n' "$w"; done
+    echo ""
+    info "以上不影响使用；要逐项体检请跑: bash verify.sh"
 }
 
 main "$@"

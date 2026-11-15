@@ -23,7 +23,37 @@ sb_feed() { # sb_feed <超时秒数> - <<'KEYS'  ... KB: 用 stdin 传入按键
         echo "──[sb_feed t=${secs}] $(date -Is)" >>/var/log/vpnmax-sbfeed.log 2>/dev/null || true
         printf '%s\n' "$out" | sed -E 's/\x1B\[[0-9;]*[mK]//g' >>/var/log/vpnmax-sbfeed.log 2>/dev/null || true
     fi
-    printf '%s' "$out"
+    printf '%s' "$out" | _sb_console_filter
+}
+
+# 控制台瘦身：上游 sb 每次调用都重刷整套 ASCII banner + 菜单 + VPS 状态 + 节点摘要
+# （7 次调用实测 921 行里 500+ 行是重复装饰，我方进度只占 53 行）。
+# 过滤只去三类完全无信息量的东西，完整原文全量落在 /var/log/vpnmax-sbfeed.log：
+#   ① 装饰：░ 拼字、~/- 分隔线、作者链接、菜单项
+#   ② 状态块：VPS 状态 / 节点摘要（每次调用都刷一遍，且末尾会有我们自己的整洁版）
+#   ③ 超长行：WARP 分流域名清单（上百个域名挤一行）
+# 错误、提示、提问、确认一律保留——宁可多留，不能吞掉真正的报错。
+_sb_console_filter() {
+    sed -E 's/\x1B\[[0-9;]*[mK]//g' | awk '
+        BEGIN { skip = 0; n = 0; blank = 0 }
+        { sub(/[ \t]+$/, "") }
+        index($0, "░")            { next }
+        /^~+$/                     { next }
+        /^-{5,}$/                  { next }
+        /甬哥/                     { next }
+        /脚本快捷方式/             { next }
+        /五协议共存脚本/           { next }
+        /^ *[0-9]{1,2}\. /         { next }
+        /VPS状态如下/              { skip = 1; n = 0; next }
+        /Sing-box节点关键信息/     { skip = 1; n = 0; next }
+        skip { n++; if (n > 12 || $0 ~ /^[[:space:]]*$/) skip = 0; next }
+        /WARP-plus-Socks5状态：/   { next }
+        /warp-socks5-ipv4优先/     { next }
+        /本地IP订阅地址：/         { next }
+        /^[[:space:]]*$/ { if (blank) next; blank = 1; print ""; next }
+        { blank = 0; print }
+    '
+    return 0
 }
 
 # /usr/bin/sb 是否需要重新安装：不存在，或用户明确传了 --force。
@@ -311,22 +341,34 @@ force_ipv4_lock() {
         cur_ip=$(cat /etc/s-box/server_ip.log 2>/dev/null || true)
         if echo "$cur_ip" | grep -q "^[0-9]"; then
             ok "入口IP已切 IPv4 ($cur_ip)"
-            # 校验订阅文件 server: 已同步为 v4（sbshare 可能因超时未完成）
-            if grep -qE 'server: .*\[' /etc/s-box/clmi.yaml 2>/dev/null; then
-                warn "订阅 server: 仍为 IPv6 入口，sbshare 可能未在超时内完成，建议重跑 bash deploy_singbox.sh --force"
-            else ok "订阅 server: 已同步 IPv4 入口"; fi
+            # 校验订阅文件 server 字段是否已同步为 v4（sbshare 可能因超时未完成）。
+            # 用 sub_server_ip 取，与下面链接打印同一真相源——各查各的会出现
+            # 「告警说还是 IPv6、链接却全是 IPv4」的自相矛盾。
+            local _env_srv=""
+            declare -F sub_server_ip >/dev/null 2>&1 && _env_srv=$(sub_server_ip 2>/dev/null || true)
+            if [ -z "$_env_srv" ] || printf '%s' "$_env_srv" | grep -q ':' || \
+               printf '%s' "$_env_srv" | grep -q '\['; then
+                warn "订阅 server 仍为 IPv6 ($_env_srv)，sbshare 可能未在超时内完成，建议重跑 bash deploy_singbox.sh --force"
+            elif [ "$_env_srv" != "$cur_ip" ]; then
+                warn "订阅 server ($_env_srv) 与入口 IP ($cur_ip) 不一致，建议重跑 bash deploy_singbox.sh --force"
+            else ok "订阅 server: 已同步 IPv4 入口 ($_env_srv)"; fi
         else warn "入口IP仍非 IPv4 ($cur_ip)，请手动 sb→15→1"; fi
-        # 打印当前订阅地址（端口可能因 sbshare 重生成而变）
-        if declare -F show_subscription >/dev/null 2>&1; then show_subscription || true; fi
+        # 此处不再打印订阅地址：末尾 step 7 之后统一打印一次（前文打印一次、文末又一次，
+        # 两段完全相同，看着像重复输出的 bug）。
     else
         warn "sb 不存在，跳过入口切换"
     fi
     # 出口校验：G2（vpnmax）目标改为 prefer_ipv4——与 7 台调优最佳状态对齐
     # （ipv4_only 在有 v6 的机器上会掐断 v6 回退；prefer_ipv4 优先 v4、v4 不通回退 v6）。
     # 幂等：cmp 无变化不碰文件不动服务。
-    local bad
-    bad=$(jq -r '.route.rules[]? | select(.strategy != null and .strategy != "prefer_ipv4") | .strategy' /etc/s-box/sb.json 2>/dev/null | head -1 || true)
-    bad+=$(jq -r '.outbounds[]? | select((.type=="direct" or .type=="socks") and .domain_strategy != "prefer_ipv4") | .domain_strategy // "null"' /etc/s-box/sb.json 2>&1 | head -1 || true)
+    # bad 分别收集两处不符合的值，用 / 连接；两处都空才算合格。
+    # （旧写法直接字符串相加，一处为空就会拼出 prefer_ipv6null 这种假值）
+    local bad="" _b1="" _b2=""
+    _b1=$(jq -r '.route.rules[]? | select(.strategy != null and .strategy != "prefer_ipv4") | .strategy' /etc/s-box/sb.json 2>/dev/null | head -1 || true)
+    _b2=$(jq -r '.outbounds[]? | select((.type=="direct" or .type=="socks") and .domain_strategy != "prefer_ipv4") | (.domain_strategy // "未设置")' /etc/s-box/sb.json 2>/dev/null | head -1 || true)
+    if [ -n "$_b1" ] && [ -n "$_b2" ]; then bad="route=${_b1} / outbound=${_b2}"
+    elif [ -n "$_b1" ]; then bad="route=${_b1}"
+    elif [ -n "$_b2" ]; then bad="outbound=${_b2}"; fi
     if [ -n "$bad" ]; then
         info "出口非 prefer_ipv4 ($bad)，尝试对齐..."
         local _sj
@@ -388,6 +430,13 @@ ensure_singbox_legacy_env() {
         systemctl restart sing-box 2>/dev/null || true
         sleep 2
     fi
+    # 重跑时 sing-box 常处在 sb 触发的重启窗口内，单次 is-active 会误报
+    # 「仍未运行」——实测同一时刻查是 down、几秒后就是 active。
+    local _i
+    for _i in $(seq 1 10); do
+        systemctl is-active sing-box >/dev/null 2>&1 && break
+        sleep 1
+    done
     if systemctl is-active sing-box >/dev/null 2>&1; then
         ok "sing-box 运行正常（legacy env 已生效）"
     else

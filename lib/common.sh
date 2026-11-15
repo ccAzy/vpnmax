@@ -23,8 +23,13 @@ info() { printf '%s[*]%s   %s
 ' "$CYAN" "$N" "$*"; }
 ok() { printf '%s[+]%s   %s
 ' "$GREEN" "$N" "$*"; }
-warn() { printf '%s[!]%s   %s
-' "$YELLOW" "$N" "$*"; }
+# 警告收集：部署动辄几百行输出，[!] 散在中间会被忽略——收尾时统一重列一遍
+VPNMAX_WARNINGS=()
+warn() {
+    printf '%s[!]%s   %s
+' "$YELLOW" "$N" "$*"
+    VPNMAX_WARNINGS+=("$*")
+}
 fail() { printf '%s[x]%s   %s
 ' "$RED" "$N" "$*"; }
 
