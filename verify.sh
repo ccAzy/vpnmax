@@ -76,28 +76,20 @@ for _b in /usr/bin/sing-box /usr/local/bin/sing-box /etc/s-box/sing-box; do [ -x
 }; done
 check "sing-box 二进制" [ -n "$SB_BIN" ]
 
-# sing-box 内核版本与 sb.sh 生成的配置格式是成对的：1.14 起删除了旧 DNS server 格式，
-# 而本项目 vendor/sb.sh 生成的是旧格式。手动用 sb 菜单升级过内核的机器会在这里暴露。
-if [ -n "$SB_BIN" ]; then
+# 内核能否解析当前配置——用真实解析器判定，不看版本号。
+# 早先这里按「版本号 > 1.13 判失败」，实测 1.14.4 用真实 sb.json 跑 sing-box check 是通过的
+# （旧 DNS 格式仍被接受，只要注入 ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS）。
+# 硬编码版本号既会误杀可用版本，也挡不住「版本够新但配置真坏」。
+if [ -n "$SB_BIN" ] && [ -f /etc/s-box/sb.json ]; then
     _SB_VER=$("$SB_BIN" version 2>/dev/null | awk '/version/{print $NF; exit}' 2>/dev/null || true)
-    if [ -n "${_SB_VER:-}" ]; then
-        _sb_major=${_SB_VER%%.*}
-        _sb_rest=${_SB_VER#*.}
-        _sb_minor=${_sb_rest%%.*}
-        case "${_sb_major}${_sb_minor}" in
-        '' | *[!0-9]*) warn "sing-box 版本号无法解析（$_SB_VER），跳过配对校验" ;;
-        *)
-            if [ "$_sb_major" -gt 1 ] || { [ "$_sb_major" -eq 1 ] && [ "$_sb_minor" -gt 13 ]; }; then
-                fail "sing-box 内核 ${_SB_VER} 与 sb.sh 配置格式不兼容（1.14 起删除旧 DNS server 格式）"
-                warn "节点大概率起不来：把 VPNMAX_SINGBOX_PIN 调回 1.13.x，或同批升级 vendor/sb.sh"
-            else
-                ok "sing-box 内核 ${_SB_VER} 与 sb.sh 配置格式匹配（≤1.13）"
-                PASS=$((PASS + 1))
-            fi
-            ;;
-        esac
+    if _sb_out=$(ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS=true                  ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true                  "$SB_BIN" check -c /etc/s-box/sb.json 2>&1); then
+        ok "sing-box ${_SB_VER:-?} 能解析当前配置（sing-box check 通过）"
+        PASS=$((PASS + 1))
     else
-        warn "读不到 sing-box 版本，跳过配对校验"
+        fail "sing-box ${_SB_VER:-?} 无法解析 /etc/s-box/sb.json —— 节点起不来"
+        printf '%s
+' "$_sb_out" | grep -E 'FATAL|ERROR|decode|unknown field' | head -2 | sed 's/^/     /'
+        warn "换一个能解析当前配置的内核版本，或升级 vendor/sb.sh（见 vendor/README.md）"
     fi
 fi
 check "/etc/s-box 目录" [ -d /etc/s-box ]

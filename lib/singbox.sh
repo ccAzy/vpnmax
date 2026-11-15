@@ -121,37 +121,38 @@ fetch_sb_sh() { # $1=输出路径
 }
 
 # sb.sh 生成的配置格式与 sing-box 内核版本是**成对**的：
-#   sb.sh@5001e76 生成 1.13 时代的旧 DNS server 格式（"type":"https" + server + path）
-#   sing-box 1.14.0 已**删除**旧 DNS server 格式 → 内核升上去而 sb.sh 没升 = 配置解析失败、服务起不来
-# pool 里 sb.sh 有一条「pin 拉取失败 → 回退 latest」的路径，会打破这个配对，所以这里做显式守卫。
-# 升级时两件事必须同批做：VPNMAX_SINGBOX_PIN 与 vendor/sb.sh（见 vendor/README.md）
-SINGBOX_COMPAT_MINOR=13
-
+# 内核能不能用，不由版本号决定，由**真实解析器**决定。
+#
+# 早先这里用「版本号 > 1.13 就判失败」，依据是「1.14 删除了旧 DNS server 格式」。
+# 实测 1.14.4 用真实 sb.json 跑 `sing-box check`：**旧 DNS 格式仍然接受**，
+# 真正需要的是 ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS=true
+# （本项目 systemd drop-in 里本来就注入了）。也就是说硬编码版本号既会误杀可用版本，
+# 也挡不住「版本号够新但配置真坏」的情况。
+#
+# 改为直接跑 `sing-box check -c sb.json`：解析通过 = 能用，解析失败 = 不能用，
+# 不管装的是 1.13 还是 1.15。版本号只用于日志。
 assert_singbox_core_compat() {
-    local bin="/etc/s-box/sing-box" ver major minor rest
+    local bin="/etc/s-box/sing-box" cfg="/etc/s-box/sb.json" ver out
     if [ ! -x "$bin" ]; then
-        warn "未找到 $bin，跳过内核版本配对校验"
+        warn "未找到 $bin，跳过配置兼容性校验"
+        return 0
+    fi
+    if [ ! -f "$cfg" ]; then
+        warn "未找到 $cfg，跳过配置兼容性校验"
         return 0
     fi
     ver=$("$bin" version 2>/dev/null | awk '/version/{print $NF; exit}' || true)
-    if [ -z "$ver" ]; then
-        warn "读不到 sing-box 版本，跳过配对校验"
+    # 与服务运行时同一组兼容开关：只在 shell 里 export，不改服务配置
+    out=$(ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS=true           ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true           "$bin" check -c "$cfg" 2>&1) && {
+        ok "sing-box ${ver:-?} 能解析当前配置（sing-box check 通过）"
         return 0
-    fi
-    major=${ver%%.*}
-    rest=${ver#*.}
-    minor=${rest%%.*}
-    case "$major$minor" in
-    '' | *[!0-9]*) warn "sing-box 版本号无法解析（$ver），跳过配对校验" && return 0 ;;
-    esac
-    if [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -gt "$SINGBOX_COMPAT_MINOR" ]; }; then
-        fail "sing-box 内核 $ver 与当前 sb.sh 的配置格式不兼容（1.14 起删除了旧 DNS server 格式）"
-        warn "这样装出来的节点会因为配置解析失败而起不来。二选一："
-        warn "  a) 把 VPNMAX_SINGBOX_PIN 调回 1.13.x 后重跑（推荐，保持冻结层）"
-        warn "  b) 整体升级 vendor/sb.sh + 内核版本，两者必须同批改（见 vendor/README.md）"
-        return 1
-    fi
-    ok "sing-box 内核 $ver 与 sb.sh 配置格式匹配（≤1.$SINGBOX_COMPAT_MINOR）"
+    }
+    fail "sing-box ${ver:-?} 无法解析 /etc/s-box/sb.json —— 装上去也起不来"
+    printf '%s
+' "$out" | grep -E 'FATAL|ERROR|decode|unknown field' | head -3 | sed 's/^/     /'
+    warn "二选一：①换一个能解析当前配置的内核版本（VPNMAX_SINGBOX_PIN=<版本> 重跑）"
+    warn "        ②升级 vendor/sb.sh 让配置生成跟上内核（见 vendor/README.md）"
+    return 1
 }
 
 install_singbox_yg() {
@@ -240,7 +241,10 @@ install_singbox_yg() {
     fi
     sleep 1
 
-    [ -f /etc/s-box/sb.json ] && {
+    # 跳过条件必须同时满足「配置在」和「内核在」。
+    # 只看 sb.json 的后果：内核被删/被升级失败/被杀软误删时，脚本仍判「已安装」并跳过，
+    # 于是留下一个没有内核的机器（服务 crash loop，脚本却继续往下走）。
+    [ -f /etc/s-box/sb.json ] && [ -x /etc/s-box/sing-box ] && {
         ok "sing-box 已安装，跳过"
         return 0
     }

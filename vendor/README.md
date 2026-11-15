@@ -33,33 +33,60 @@
 而 pin + SHA256 已经拿到"内容不可变、可校验、可回滚"的全部收益。
 （顺带避开这几份第三方文件的再分发/许可证问题。）
 
-## 三之一、重要：`sb.sh` 与 sing-box 内核版本是**成对**的，必须同批升级
+## 三之一、sing-box 内核：默认跟随上游最新，兼容性由真实解析器判定
 
-上游 `sb.sh` 生成 sing-box 的**配置文件**，而配置字段的可用性随内核版本变化：
+### 先纠正一条曾经的错误结论
 
-| 时间线 | 事实 |
+本文档早先写过「**sing-box 1.14.0 删除了旧 DNS server 格式**（`"type":"https"` + `server` + `path`），
+所以内核和 sb.sh 必须锁在一起」。**实测证明这条是错的**：
+
+```
+# 用真实 sb.json 喂给 sing-box 1.14.4
+sing-box check -c /etc/s-box/sb.json
+→ FATAL: to continuing using this feature, set ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS=true
+```
+
+失败原因是 **`domain_strategy` 这类 legacy domain strategy 选项**，**不是** DNS server 的 `path` 字段。
+把那个环境变量注入后：
+
+```
+ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS=true sing-box check -c /etc/s-box/sb.json
+→ WARN（仅告警）exit=0   ✅ 通过
+```
+
+而**这个环境变量本项目一直就在注入**（`lib/singbox.sh: ensure_singbox_legacy_env` 写的
+`/etc/systemd/system/sing-box.service.d/99-vpnmax.conf`，用于 2026-08-27 那次 `domain_strategy` 崩溃）。
+
+结论：**1.14.4 + `sb.sh@5001e76` 生成的配置是可以跑的**，之前"必须锁在 1.13"的判断是把
+两个不同的弃用项搞混了。
+
+### 现在的策略
+
+| 项 | 做法 |
 | --- | --- |
-| sing-box 1.12 | DNS server 格式重构，旧格式标记为 deprecated |
-| **sing-box 1.14.0** | **旧 DNS server 格式被删除**（`"type":"https"` + `server` + `path` 这种写法不再被接受） |
-| 本项目 pin | `sb.sh@5001e76`（生成旧格式） + sing-box **1.13.19** → 配对正确 |
+| 内核版本 | **默认跟随上游最新**（安装时查 GitHub API 取 latest） |
+| 冻结 | `VPNMAX_SINGBOX_PIN=1.14.4 bash deploy_singbox.sh` 可钉住指定版本 |
+| 兼容性门禁 | **跑真实的 `sing-box check -c sb.json`**，不看版本号 |
+| 服务运行时 | 注入 `ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS=true`（既有 drop-in） |
 
-也就是说：**只升其中一个 = 服务起不来**。
+**为什么门禁改成真解析器**：版本号只是个代理指标。它会
+①误杀「版本号够新但配置其实能用」的组合（就是上面这条）；
+②放过「版本号够旧但配置真坏」的情况。
+`sing-box check` 是唯一权威判据——解析通过就是能用，不管装的是 1.13 还是 1.16。
 
-- 若把 `VPNMAX_SINGBOX_PIN` 升到 1.14+ 而 `vendor/sb.sh` 不升 → 配置解析失败、`sing-box` 无法启动
-- 若把 `vendor/sb.sh` 升到新版本而内核仍是 1.13 → 新格式配置被旧内核拒绝
+实现在 `lib/singbox.sh: assert_singbox_core_compat`（部署后）和 `verify.sh`（巡检时），
+两处都对 `sing-box check` 的 FATAL/ERROR 行做回显，失败时不写部署成功标记。
 
-**代码侧已有守卫**：`lib/singbox.sh: assert_singbox_core_compat` 在安装后读回内核版本，
-> 1.13 时会明确失败并提示二选一，且不写部署成功标记（避免"装完了但其实起不来"）。
+### 仍然成立的老教训
 
-历史教训：pool 里曾有一条「pin 拉取失败 → 回退 latest」的路径。这在 1.13 时代是对的（都是 1.13），
-但在 1.14 发布后就变成隐患 —— pin 资产一旦失效，就会**装出内核与配置错配的组合**。
-所以升级时必须两者同批，且改完跑一次真机部署确认 `sing-box` 能起来。
+池里那条「pin 拉取失败 → 静默回退 latest」的路径仍然是隐患（会装出没人验证过的组合）。
+现在的处理是**两种模式都 fail-loud**：跟随最新时拉不到就明确报错，锁定版本时拉不到也不换版本。
 
 ## 三、只 pin 版本号（活水层）
 
 | 依赖 | 现值 | 说明 |
 |---|---|---|
-| sing-box 内核 | `1.13.19` | `VPNMAX_SINGBOX_PIN`；这是本项目已验证过的版本。**与 sb.sh 成对，不可单独升** |
+| sing-box 内核 | **跟随上游最新** | `VPNMAX_SINGBOX_PIN` 留空=最新；填版本号=冻结。兼容性由 `sing-box check` 判定，见上节 |
 | cloudflared | `2026.8.3` | `VPNMAX_CLOUDFLARED_PIN`；与 `verify.sh` 的 G6 断言一致 |
 | cfst（CloudflareSpeedTest） | `v2.3.5` | `CFST_PIN`（在 `vendor/sb.sh` 内部使用） |
 

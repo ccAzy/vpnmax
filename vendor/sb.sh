@@ -30,7 +30,10 @@ VPNMAX_ACME_COMMIT="e3299a70692c9804df75c168ff3d965659161843"
 VPNMAX_ACME_SHA256="06edab0c64cc1439b5991966184ba04f6e6b1736987bfe7d0fec45b1dc32f247"
 VPNMAX_CFWARP_COMMIT="f2f634ba79452a0ffadcd93a6e6524cf4b7b84df"
 VPNMAX_CFWARP_SHA256="7ebb2eba5c230d22643cdc77fdea0163877abcb0b5dde22b6b227f47523926d9"
-VPNMAX_SINGBOX_PIN="1.13.19"
+# sing-box 内核版本：留空 = 跟随上游最新（默认）；
+# 需要冻结时用环境变量钉住，例如 VPNMAX_SINGBOX_PIN=1.14.4 bash deploy_singbox.sh
+# 是否"能用"不由版本号决定，由装完后的 sing-box check 实际解析配置决定（见 lib/singbox.sh）
+VPNMAX_SINGBOX_PIN="${VPNMAX_SINGBOX_PIN-}"
 VPNMAX_CLOUDFLARED_PIN="2026.8.3"
 VPNMAX_SBWPPH_COMMIT="9e8b710c191d0cfd43f50f3d35d11b5ff0c314bc"
 VPNMAX_SBWPPH_SHA_AMD64="93c7c5d7cb2c82cef44de782ae030b5f8fdb15038e3e95662e451bce7d3ee531"
@@ -318,12 +321,14 @@ yellow "1：使用目前最新正式版内核 (回车默认)"
 yellow "2：使用之前1.10.7正式版内核 (支持geosite分流、IP优选级切换，无Anytls协议)"
 readp "请选择【1-2】：" menu
 if [ -z "$menu" ] || [ "$menu" = "1" ] ; then
-# vpnmax: 默认用 pin 版本（原为跟随上游 latest）
+# vpnmax: PIN 非空 = 冻结指定版本；留空 = 跟随上游最新
 sbcore="$VPNMAX_SINGBOX_PIN"
 if [ -z "$sbcore" ]; then
-sbcore=$(curl -Ls https://github.com/SagerNet/sing-box/releases/latest | grep -oP 'tag/v\K[0-9.]+' | head -n 1)
+sbcore=$(curl -Ls --connect-timeout 10 --max-time 30 https://api.github.com/repos/SagerNet/sing-box/releases/latest 2>/dev/null | grep -oP '"tag_name"\s*:\s*"v\K[0-9.]+' | head -n 1)
+[ -z "$sbcore" ] && sbcore=$(curl -Ls --connect-timeout 10 --max-time 30 https://github.com/SagerNet/sing-box/releases/latest 2>/dev/null | grep -oP 'tag/v\K[0-9.]+' | head -n 1)
+yellow "vpnmax: 跟随上游最新 sing-box $sbcore"
 else
-yellow "vpnmax: 使用 pin 版本 sing-box $sbcore"
+yellow "vpnmax: 使用指定版本 sing-box $sbcore"
 fi
 else
 sbcore='1.10.7'
@@ -334,10 +339,14 @@ curl -fL -o /etc/s-box/sing-box.tar.gz  -# --retry 2 https://github.com/SagerNet
 # 原因：本脚本生成的是 1.13 时代的旧 DNS server 格式，而 sing-box 1.14.0 已删除该格式。
 # 回退 latest 会得到「新内核 + 旧配置」→ 配置解析失败、服务起不来，且用户看到的是
 # 「安装成功」之后的一切都莫名其妙。宁可在这里明确失败，也不要装出一个起不来的节点。
-if [[ ! -s '/etc/s-box/sing-box.tar.gz' && -n "$VPNMAX_SINGBOX_PIN" && "$sbcore" = "$VPNMAX_SINGBOX_PIN" ]]; then
-red "pin 版 sing-box $sbcore 拉取失败（发布资产可能已失效，或被网络阻断）"
-red "已拒绝自动回退 latest：1.14+ 内核不接受本脚本生成的 DNS 配置格式，装上也起不来。"
-red "处理：①修正网络后重试；②或同批升级 VPNMAX_SINGBOX_PIN 与 vendor/sb.sh（见 vendor/README.md）"
+if [[ ! -s '/etc/s-box/sing-box.tar.gz' ]]; then
+red "sing-box $sbcore 拉取失败（发布资产可能已失效，或被网络阻断）"
+if [ -n "$VPNMAX_SINGBOX_PIN" ]; then
+red "当前是锁定版本模式（VPNMAX_SINGBOX_PIN=$VPNMAX_SINGBOX_PIN），不会自动换版本。"
+else
+red "当前是跟随最新模式；若确认最新版不可用，可用 VPNMAX_SINGBOX_PIN=<版本> 锁定后重试。"
+fi
+red "处理：①修正网络后重试；②或用 VPNMAX_SINGBOX_PIN=<版本> 指定一个可用版本（见 vendor/README.md）"
 exit 1
 fi
 if [[ -s '/etc/s-box/sing-box.tar.gz' ]]; then

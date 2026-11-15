@@ -92,12 +92,13 @@ SB_COMMIT="5001e76efc9e15eac1f8ff33a0b389172e331e1d"
 # 每次改 vendor/sb.sh 都必须同步重算本常量，否则安装时校验失败拒绝安装。
 # 2026-09-12 本地 patch（冻结层）：
 #   ① acme.sh / CFwarp.sh / sbwpph 改为 pin commit + SHA256 校验（不再裸拉上游 main 后 root 执行）
-#   ② 版本 pin：sing-box 1.13.19 / cloudflared 2026.8.3 / cfst v2.3.5（pin 拉不到才告警回退 latest）
+#   ② 版本策略：sing-box 跟随上游最新（可用 VPNMAX_SINGBOX_PIN 冻结）
+#      cloudflared 2026.8.3 / cfst v2.3.5 仍为固定 pin
 #   ③ bbr() 改本地最小实现（不再拉 teddysun/across，避免覆盖本项目的 TCP buffer 调优）
-SB_SHA256="2fcdd73438ab46590ec2114ffe32a6a826026fbb78fa995d6335fe9b061a2b2a"
+SB_SHA256="e0bada0edac36653df9fb6f88c6631286fa77ebbedcce172443f7d6085ac623f"
 # apply_argo_patch 只把 --protocol http2 改成 auto 后的精确哈希。
 # 只信任这两个当前版本哈希；旧 /etc/s-box/.sb-argo-patched.sha256 不再能“保活”历史 sb.sh。
-SB_ARGO_PATCHED_SHA256="5c9f866fc0e433505106ac11f3a9f1e1a723f290cd09d90b3f2525ba49fc50be"
+SB_ARGO_PATCHED_SHA256="8abdbaf9b6d2074f75d29372bb065cfcaac5dccf27da119448a3289021c860a9"
 SB_URL="https://raw.githubusercontent.com/ccAzy/vpnmax/main/vendor/sb.sh"
 
 # ── 环境预检 + 第二阶段依赖兜底 ──
