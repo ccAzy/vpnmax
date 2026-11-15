@@ -28,8 +28,10 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: 安装 bats
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats
+      - name: 安装 bats 与 jq
+        # jq 虽然 runner 镜像里通常已有，但显式装一次：lib/subscription.sh 的
+        # sub_server_ip / show_nodes 测试依赖它，缺了会静默 skip
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats jq
 
       - name: 运行单元测试
         run: bats tests/

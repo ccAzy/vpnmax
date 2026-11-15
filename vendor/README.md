@@ -77,6 +77,25 @@ ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS=true sing-box check -c /etc/s-b
 实现在 `lib/singbox.sh: assert_singbox_core_compat`（部署后）和 `verify.sh`（巡检时），
 两处都对 `sing-box check` 的 FATAL/ERROR 行做回显，失败时不写部署成功标记。
 
+### 怎么知道「该不该 re-vendor」
+
+冻结的代价是不跟随上游，所以要有办法把「落后了多少」看出来：
+
+```bash
+bash tools/check-upstream-drift.sh          # 只查 commit 落后
+DEEP=1 bash tools/check-upstream-drift.sh    # 额外比对上游文件与本地 vendor 的差异
+```
+
+触发条件（满足任一条才做，且必须**整层移植**，不能只换文件）：
+
+1. 部署时 `sing-box check` 开始失败（内核真的删了 legacy 逃生口）；
+2. 上游修了我们本地补丁层里的某个缺陷，而我们没有独立修；
+3. 需要上游的新协议/新特性。
+
+> ⚠️ **不要把上游 `sb.sh` 直接覆盖 `vendor/sb.sh`**。实测上游 `b13f943` 里仍有
+> **93 处** `sed 's://.*::g'` —— 直接覆盖会重新引入「订阅全空」那个 P0。
+> 正确做法是「上游文件 + 重新应用本地补丁层（63 处 vpnmax 标记）」。
+
 ### 仍然成立的老教训
 
 池里那条「pin 拉取失败 → 静默回退 latest」的路径仍然是隐患（会装出没人验证过的组合）。

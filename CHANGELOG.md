@@ -1,5 +1,69 @@
 # Changelog
 
+## 2026-11-15 — 补测试覆盖（18→30 条）+ 把「上游漂移」变成可见信号
+
+上一轮盘点出 6 项遗留问题，这轮把「能修的」修掉，并说清「故意没修的那个为什么」。
+
+### 一、测试覆盖：18 → 30 条，补齐三个零覆盖模块
+
+原来 `lib/subscription.sh`、`lib/warp.sh`、`lib/verify/*` **一条测试都没有**。
+而「订阅全空」那个 P0 恰好落在 subscription 路径上——靠真机部署才撞出来。
+
+新增 `tests/test_regressions.bats`（12 条），每条对应一个真实发生过的事故：
+
+| 测试 | 钉住的事故 |
+| --- | --- |
+| 不再含 `sed 's://.*::g'` | 订阅全空 P0 |
+| 含 `//` 的值经 `cat\|jq` 完好 | 同上（语义层） |
+| 并发锁拒绝第二个实例 / 接管陈旧 pidfile / 退出后清理 | 并发抢订阅 |
+| `sub_server_ip` 优先 clmi.yaml | 告警说 IPv6、链接却 IPv4 |
+| 端口/token 白名单 | 订阅链接拼接前的防线 |
+| TUIC 按唯一配置名清理，不退回 `kill $!` | 每跑一次漏一个进程 |
+| verify 无第二份内联副本 | 双实现导致 bug 两份都有 |
+| 未知参数被拒 | `--no-reboo` 会重启服务器 |
+| warn/note/hint 分级 | 可选组件与致命失败混为一谈 |
+| 上游装饰行被过滤，错误保留 | 输出瘦身 |
+
+为了让锁可测，`vpnmax_lock` 支持 `VPNMAX_LOCK_DIR` 覆盖（线上行为不变）。
+CI 显式安装 `jq`（runner 镜像里通常有，但不该赌）。
+
+**结果：30 通过 / 0 失败。**
+
+### 二、上游漂移：从「隐性债」变成「可查的信号」
+
+`vendor/sb.sh` 停在 `5001e76`，上游已 `b13f943`。这件事原来只有我心里有数，
+现在有了 `tools/check-upstream-drift.sh`：
+
+```bash
+bash tools/check-upstream-drift.sh
+#   sing-box-yg(sb.sh)  5001e76efc9e  b13f9435c479  **落后**
+
+DEEP=1 bash tools/check-upstream-drift.sh
+#   补丁规模：63 处 vpnmax 标记
+#   上游那份里的已知缺陷：sed 's://.*::g' 命中 93 处
+```
+
+**为什么这轮不做 re-vendor**（诚实说明）：
+
+1. 上游 `b13f943` **仍有 93 处 `sed 's://.*::g'`** —— 直接换文件会重新引入「订阅全空」P0；
+2. 我们本地有 **63 处 vpnmax 补丁层**（冻结层常量、pinned 下载、mport 修复、防火墙不整机拆、
+   PIN 逻辑、no-self-update）—— 必须整层移植，不是换文件；
+3. 上游把 DNS 段重写成 **fakeip + dns-cn** 模型，会改变服务端的分流行为，
+   与我们 `force_ipv4_lock` / WARP 域名分流的 jq 注入有交互面，需要完整重验。
+
+也就是说这不是「改个版本号」，是**重做一遍 vendoring**。而当前版本与最新内核
+（1.14.4）实测兼容（`sing-box check` 通过），触发条件尚未出现。
+已在 `vendor/README.md` 写明三条触发条件与正确做法。
+
+### 三、全量验证（同一台 Debian 12 虚拟机）
+
+```
+[1] 单元测试   30 通过 / 0 失败
+[2] 部署       exit=0，内核 1.14.4，sing-box check 通过，用时 153s
+[3] 体检       37 通过 / 0 失败，exit=0
+[4] 清理       exit=0，文件残留 0、防火墙链 0、孤儿进程 0
+```
+
 ## 2026-09-23 — 并发保护：两个 deploy 同时跑会互相抢订阅（+ 途中三个自找的 bug）
 
 并发测试（同时起两个 `deploy_singbox --force`）：**两个都 exit=0、都报成功**，

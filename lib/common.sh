@@ -73,8 +73,10 @@ vpnmax_lock() {
     # 必须分两条 local：同一条里 bash 会在执行赋值前就展开所有词，
     # 于是 ${name} 还是旧值（空），锁文件会变成 vpnmax-.pid（SC2318）
     local name="${1:-system}"
-    local lockfile="/var/lock/vpnmax-${name}.pid" old
-    mkdir -p /var/lock 2>/dev/null || true
+    # VPNMAX_LOCK_DIR 可覆盖：测试用临时目录，线上默认 /var/lock
+    local lockdir="${VPNMAX_LOCK_DIR:-/var/lock}"
+    local lockfile="$lockdir/vpnmax-${name}.pid" old
+    mkdir -p "$lockdir" 2>/dev/null || true
     if [ -f "$lockfile" ]; then
         old=$(tr -cd '0-9' <"$lockfile" 2>/dev/null || true)
         if [ -n "$old" ] && [ "$old" != "$$" ] && kill -0 "$old" 2>/dev/null; then
