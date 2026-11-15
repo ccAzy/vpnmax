@@ -42,8 +42,84 @@ jobs:
       - name: shellcheck（自有代码）
         run: |
           # SC1090/SC1091 = 非字面量 source（lib 动态加载）；SC2015 = 有意为之的 A && B || C 三元
-          out=$(shellcheck -x --severity=warning -f gcc ./*.sh lib/*.sh lib/verify/*.sh 2>/dev/null | grep -vE 'SC1090|SC1091|SC2015' || true)
+          out=$(shellcheck -x --severity=warning -f gcc ./*.sh lib/*.sh lib/verify/*.sh tools/*.sh 2>/dev/null | grep -vE 'SC1090|SC1091|SC2015' || true)
           if [ -n "$out" ]; then echo "$out"; exit 1; fi
 
       - name: lib 完整性门禁（防「双实现」回归 + R6 头部注释完整性）
         run: python3 tools/check-lib-integrity.py
+
+  smoke:
+    # 补上「CI 绿 ≠ 部署可用」的缺口：原来 CI 只跑 bats/shellcheck/门禁，
+    # 四个入口脚本一个都没真跑过。这里在干净 runner 上跑 --dry-run 与 verify，
+    # 至少保证「脚本能启动、参数解析正确、dry-run 契约成立、体检不崩」。
+    # 真实部署仍需 VPS，不在 CI 范围。
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: 安装运行依赖
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq jq curl iptables
+
+      - name: 四个入口 --dry-run 必须成功
+        run: |
+          fail=0
+          for f in bootstrap.sh deploy_optimize.sh deploy_singbox.sh cleanup.sh; do
+            echo "::group::$f --dry-run"
+            if sudo bash "$f" --dry-run; then
+              echo "  ok: $f"
+            else
+              echo "::error::$f --dry-run 退出码非 0"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $fail
+
+      - name: --dry-run 不改动系统（快照比对）
+        # 注意：GitHub 的 run: 默认带 bash -e，snap() 里任何一条失败都会中断整个步骤
+        # （crontab -l 无 crontab 时返回 1、iptables-save 非 root 时失败）——
+        # 所以每条都接 || true，只比较"能取到的部分"。
+        run: |
+          snap() {
+            {
+              sudo ls -la /etc/s-box 2>/dev/null || true
+              sudo ls -la /etc/sysctl.d/99-vpnmax-* 2>/dev/null || true
+              # 用 iptables -S 而不是 iptables-save：后者带包/字节计数器，
+              # 任何一点网络流量都会变，快照必然"前后不一致"（实测踩到）。
+              # -S 只有规则文本，才是真正要比较的东西。
+              sudo iptables -S 2>/dev/null || true
+              crontab -l 2>/dev/null || true
+              sudo crontab -l 2>/dev/null || true
+              sudo systemctl list-unit-files 2>/dev/null | grep -i vpnmax || true
+            } | sha256sum
+          }
+          before=$(snap)
+          for f in deploy_optimize.sh deploy_singbox.sh cleanup.sh; do
+            sudo bash "$f" --dry-run >/dev/null 2>&1 || true
+          done
+          after=$(snap)
+          if [ "$before" != "$after" ]; then
+            echo "::error::--dry-run 改动了系统状态"
+            exit 1
+          fi
+          echo "dry-run 契约成立：系统状态前后一致"
+
+      - name: verify 在未部署机器上结构化报错（不崩）
+        run: |
+          set +e
+          out=$(sudo bash verify.sh 2>&1); rc=$?
+          set -e
+          echo "$out" | tail -6
+          if echo "$out" | grep -qE 'command not found|unbound variable|syntax error'; then
+            echo "::error::verify 出现未捕获错误"; exit 1
+          fi
+          if ! echo "$out" | grep -q '通过:'; then
+            echo "::error::verify 没有输出汇总行"; exit 1
+          fi
+          if [ "$rc" -ne 1 ]; then
+            echo "::error::verify 在未部署机器上应 exit 1，实得 $rc"; exit 1
+          fi
+          echo "ok: verify 结构化报错且未被未捕获错误打断"
