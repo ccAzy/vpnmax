@@ -292,13 +292,10 @@ jobs:
           name: publish-${{ matrix.arch }}-${{ matrix.profile }}-${{ env.KERNEL_VERSION }}
           path: ./publish-markers/${{ matrix.arch }}-${{ matrix.profile }}
 
-      - name: 上传 deb 包
-        if: env.BUILD_NEEDED == 'true' && env.PUBLISH_NEEDED == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: deb-${{ matrix.arch }}-${{ matrix.profile }}
-          path: ./kernel/linux-*.deb
-
+      # 原来这里会把 .deb 再上传成 artifact（deb-<arch>-<profile>，约 160MB/个）。
+      # 但没有任何 job 下载它——deb 是在同一个 job 里直接发到 Release 的（下一步）。
+      # 结果是纯重复占额度：GitHub Free 只有 500MB，实测被顶到 1926MB（385%）。
+      # Release 资产不占 artifact 额度，需要下载包的走 Releases 即可。
       - name: 发布到 GitHub Release
         if: env.BUILD_NEEDED == 'true' && env.PUBLISH_NEEDED == 'true'
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
