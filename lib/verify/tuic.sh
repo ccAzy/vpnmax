@@ -26,4 +26,5 @@ JSON_TMP
             rm -f /tmp/vpnmax-verify-tuic.json /tmp/vpnmax-verify-tuic.log 2>/dev/null || true
         fi
     fi
+    return 0
 }

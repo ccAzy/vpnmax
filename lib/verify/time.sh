@@ -24,4 +24,8 @@ verify_time() {
     local _off
     _off=$(timeout 5 ntpdate -q ntp.aliyun.com 2>&1 | grep -oE 'offset .* sec' | head -1 || true)
     [ -n "$_off" ] && info "NTP 偏移: $_off"
+    # 恒返回 0：调用方（verify.sh）是 set -e 且裸调用本函数；
+    # 若这里以「[ -n ] && ...」收尾，取不到 NTP 偏移时函数返回 1，
+    # 会让 verify.sh 在「时间同步」这一段当场退出，后面所有检查全部跳过。
+    return 0
 }

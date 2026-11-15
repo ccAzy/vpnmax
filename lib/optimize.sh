@@ -24,7 +24,8 @@ vpnmax_sysctl_set() {
 
 # GRUB 文件备份+重载：备份到 $BAK_DIR（默认 /var/backups/vpnmax），优先 update-grub，回退 grub-mkconfig。
 vpnmax_grub_backup() {
-    local bakdir="${BAK_DIR:-/var/backups/vpnmax}/grub-$(date +%Y%m%d)"
+    local bakdir
+    bakdir="${BAK_DIR:-/var/backups/vpnmax}/grub-$(date +%Y%m%d)"
     run mkdir -p "$bakdir" 2>/dev/null || true
     run cp -a /etc/default/grub "$bakdir/grub" 2>/dev/null || true
 }
@@ -228,52 +229,96 @@ MODS
 
     local conf="/etc/sysctl.d/99-vpnmax-brutal.conf"
     atomic_write "$conf" <<SYS
-# vpnmax 网络优化（按内存分级，防 OOM；tcp_mem 单位为内存页）
+# vpnmax 网络优化配置（按物理内存分级生成；tcp_mem 单位＝内存页）
+# 本次生成：RMEM=${RMEM}B  TCPMEM=${TCPMEM}(页)  conntrack=${CONNTRACK_MAX}
+# 别手改本文件 —— 重跑 deploy_optimize.sh 会整份重写（备份见同目录 .bak）
+
+# ── 1. 拥塞控制与队列调度（一切的前提）──
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
+
+# ── 2. TCP 缓冲（单连接上限 + 全系统上限，两者必须配套）──
 net.core.rmem_max = $RMEM
 net.core.wmem_max = $RMEM
 net.ipv4.tcp_rmem = 4096 87380 $RMEM
 net.ipv4.tcp_wmem = 4096 65536 $RMEM
 net.ipv4.tcp_mem = $TCPMEM
 net.ipv4.tcp_moderate_rcvbuf = 1
-net.ipv4.tcp_no_metrics_save = 1
 net.ipv4.tcp_limit_output_bytes = 262144
+net.ipv4.tcp_app_win = 0
+
+# ── 3. 连接队列与端口（高并发代理必备）──
 net.core.netdev_max_backlog = 262144
 net.core.somaxconn = 65535
 net.ipv4.tcp_max_syn_backlog = 8192
-net.ipv4.tcp_slow_start_after_idle = 0
-net.ipv4.tcp_fastopen = 3
-net.ipv4.tcp_notsent_lowat = 16384
-net.ipv4.tcp_keepalive_time = 120
-net.ipv4.tcp_keepalive_intvl = 30
-net.ipv4.tcp_keepalive_probes = 3
 net.ipv4.ip_local_port_range = 1024 65535
-net.netfilter.nf_conntrack_max = $CONNTRACK_MAX
-net.ipv4.tcp_app_win = 0
+net.ipv4.tcp_tw_reuse = 1
+
+# ── 4. 时延与丢包（长连接/视频暂停恢复/路径 MTU）──
+net.ipv4.tcp_slow_start_after_idle = 0
+net.ipv4.tcp_no_metrics_save = 1
+net.ipv4.tcp_notsent_lowat = 16384
+net.ipv4.tcp_mtu_probing = 1
 net.ipv4.tcp_early_retrans = 3
 net.ipv4.tcp_thin_linear_timeouts = 1
 net.ipv4.tcp_retrans_collapse = 0
 net.ipv4.tcp_rfc1337 = 1
 net.ipv4.tcp_dsack = 1
 net.ipv4.tcp_comp_sack_nr = 3
-net.core.optmem_max = 204800
+
+# ── 5. 存活与快速重连 ──
+net.ipv4.tcp_keepalive_time = 120
+net.ipv4.tcp_keepalive_intvl = 30
+net.ipv4.tcp_keepalive_probes = 3
+net.ipv4.tcp_fastopen = 3
+
+# ── 6. UDP / QUIC（Hysteria2、TUIC 走的就是这条）──
 net.ipv4.udp_rmem_min = 8192
 net.ipv4.udp_wmem_min = 8192
-net.core.busy_read = 50
-net.core.busy_poll = 50
+net.core.optmem_max = 204800
+
+# ── 7. conntrack（9 类入站 + QUIC 会大量占用）──
+net.netfilter.nf_conntrack_max = $CONNTRACK_MAX
+
+# ── 8. 忙轮询：显式关闭 ──
+# busy_read 是 SO_BUSY_POLL 的**系统级默认值**（内核在 sock_init_data 里直接赋给每个新 socket）。
+# 写成 50 意味着所有 socket 在数据未就绪时都会空转 50µs 再睡 —— 代理场景的瓶颈是广域网 RTT
+# （几十毫秒），这 50µs 换不来可感知的延迟收益，却会在 1~2 vCPU 的小机器上白烧 CPU
+# （云厂商按 CPU 积分计费时尤其明显）。除非跑的是 OLTP 且确认 CPU 富余，否则保持关闭。
+net.core.busy_read = 0
+net.core.busy_poll = 0
 SYS
     if ! run sysctl --system; then
         warn "sysctl --system 执行失败，部分网络参数可能未生效"
     fi
     manifest "conntrack max=$CONNTRACK_MAX hash=$CONNTRACK_HASH"
-    # 回读校验：conntrack 是「写了不等于生效」的典型——模块没加载时 sysctl 会静默失败
-    local _ck
+    # 回读校验：conntrack 是「写了不等于生效」的典型——模块没加载时 sysctl 会静默失败。
+    # 这里把调优里最关键的几个键都读回来核一遍，避免「打了一堆参数、其实只有一半生效」。
+    local _ck _chk _k _w _bad=""
     _ck=$(sysctl -n net.netfilter.nf_conntrack_max 2>/dev/null || true)
-    if [ -n "$_ck" ] && [ "$_ck" = "$CONNTRACK_MAX" ]; then
-        ok "网络参数已写入 $conf 并应用（conntrack=$CONNTRACK_MAX，按内存分级防 OOM）"
+    for _chk in \
+        "net.ipv4.tcp_congestion_control=bbr" \
+        "net.core.default_qdisc=fq" \
+        "net.core.rmem_max=$RMEM" \
+        "net.ipv4.tcp_rmem=4096 87380 $RMEM" \
+        "net.ipv4.tcp_mem=$TCPMEM" \
+        "net.ipv4.tcp_mtu_probing=1" \
+        "net.ipv4.tcp_tw_reuse=1" \
+        "net.core.busy_read=0" \
+        "net.ipv4.ip_local_port_range=1024 65535" \
+        "net.netfilter.nf_conntrack_max=$CONNTRACK_MAX"; do
+        _k="${_chk%%=*}"
+        _w="${_chk#*=}"
+        sysctl_expect "$_k" "$_w" ||
+            _bad="$_bad ${_k}(实得 $(sysctl -n "$_k" 2>/dev/null || echo 读不到))"
+    done
+    if [ -z "$_bad" ]; then
+        ok "网络参数已写入 $conf 并逐项回读通过（rmem_max=$((RMEM / 1024 / 1024))MB, conntrack=$CONNTRACK_MAX）"
     else
-        warn "conntrack 未生效：期望 $CONNTRACK_MAX，实得 ${_ck:-读不到}（已尝试写 /etc/modules-load.d/vpnmax-conntrack.conf，重启后应自动生效）"
+        warn "以下参数未按预期生效：$_bad"
+        [ "$_ck" = "$CONNTRACK_MAX" ] ||
+            warn "conntrack 未生效（已尝试写 /etc/modules-load.d/vpnmax-conntrack.conf，重启后应自动生效）"
+        warn "排查：sysctl --system 2>&1 | grep -i 99-vpnmax-brutal ；各 sysctl.d 文件按文件名排序，后者覆盖前者"
     fi
 }
 

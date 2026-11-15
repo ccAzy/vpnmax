@@ -39,6 +39,18 @@ die() {
 MANIFEST=${MANIFEST:-"/var/log/vpnmax-manifest.log"}
 manifest() { echo "[$(date -Is)] $*" >>"$MANIFEST" 2>/dev/null || true; }
 
+# sysctl 生效校验：读回实际值并把空白归一化后比较。
+# 为什么需要：sysctl --system 对「键不存在 / 模块未加载 / 被后续文件覆盖」都是静默跳过，
+# 写了不等于生效；只靠 echo 成功提示会给出假绿灯。
+# 返回：0=一致  1=不一致  2=读不到该键
+sysctl_expect() { # <key> <期望值>
+    local k="$1" want="$2" got
+    got=$(sysctl -n "$k" 2>/dev/null | tr -s '[:space:]' ' ' | sed 's/ *$//' || true)
+    [ -z "$got" ] && return 2
+    [ "$got" = "$want" ] && return 0
+    return 1
+}
+
 # DRY_RUN 感知的执行包装——两种语义，按调用方需要选，别混用：
 #   run    — 失败即失败（set -e 下中止），保留 stderr，可观测。用于「必须成功」的部署动作。
 #   run_ok — 吞掉失败与 stderr。用于「尽力而为」的清理/探测动作。

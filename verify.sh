@@ -50,12 +50,14 @@ check() {
     if "$@" 2>/dev/null; then
         ok "$desc"
         PASS=$((PASS + 1))
-        return 0
     else
         fail "$desc"
         FAIL=$((FAIL + 1))
-        return 1
     fi
+    # 恒返回 0：脚本是 set -e，若这里返回 1，verify 会在「第一个失败项」当场退出，
+    # 后面的检查一项都跑不到 —— 而验证脚本的价值恰恰是把问题一次全列出来。
+    # 结果由 PASS/FAIL 计数与汇总段体现，不靠返回值。
+    return 0
 }
 
 echo ""
@@ -102,6 +104,33 @@ if [ -n "$IFACE" ] && command -v tc >/dev/null 2>&1; then
     else
         warn "默认网卡未检测到 fq 队列调度"
     fi
+fi
+
+# 调优参数落地：把 /etc/sysctl.d/99-vpnmax-brutal.conf 的每一项读回来核。
+# 只查 BBR/fq 是不够的——sysctl --system 对「键不存在 / 模块未加载 / 被后序文件覆盖」
+# 全都静默跳过，配置写着、内核里没生效，是这个层面最常见的问题。
+_SYS_CONF="/etc/sysctl.d/99-vpnmax-brutal.conf"
+if [ -f "$_SYS_CONF" ]; then
+    _sys_n=0
+    _sys_bad=""
+    while IFS= read -r _line; do
+        case "$_line" in '' | \#*) continue ;; esac
+        _k=$(printf '%s' "$_line" | cut -d= -f1 | tr -d ' 	')
+        _w=$(printf '%s' "$_line" | cut -d= -f2- | sed 's/[[:space:]]*#.*$//; s/^ *//; s/ *$//')
+        [ -n "$_k" ] && [ -n "$_w" ] || continue
+        _sys_n=$((_sys_n + 1))
+        sysctl_expect "$_k" "$_w" || _sys_bad="$_sys_bad
+      ${_k}（配置=$_w 实际=$(sysctl -n "$_k" 2>/dev/null || echo 读不到)）"
+    done <"$_SYS_CONF"
+    if [ -z "$_sys_bad" ]; then
+        ok "内核调优 $_sys_n 项全部与配置一致（$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)/$(sysctl -n net.core.default_qdisc 2>/dev/null)）"
+        PASS=$((PASS + 1))
+    else
+        warn "以下调优项未生效（配置与内核实际不符，共 $_sys_n 项里）：$_sys_bad"
+        warn "排查：sysctl --system 2>&1 | grep 99-vpnmax-brutal ；注意 /etc/sysctl.d 按文件名排序，后序文件会覆盖前者"
+    fi
+else
+    warn "未找到 $_SYS_CONF（未执行 deploy_optimize.sh？）"
 fi
 if systemctl is-active --quiet vpnmax-net-tuning.service 2>/dev/null; then
     ok "持久化网络调优服务运行中"
