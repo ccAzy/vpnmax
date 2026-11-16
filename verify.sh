@@ -464,6 +464,18 @@ if [ -f /etc/s-box/subport.log ] && [ -f /etc/s-box/subtoken.log ]; then
     SUBPORT=$(cat /etc/s-box/subport.log)
     SUBTOKEN=$(cat /etc/s-box/subtoken.log)
     ok "订阅端口: $SUBPORT"
+    # 绑定地址必须是 0.0.0.0/[::]，不能只有 127.0.0.1——订阅链接印的是公网 IP，
+    # 绑回环时客户端 ConnectionRefused，而只测 127.0.0.1 的检查一路绿灯。
+    # 2026-11-16 YDL 重启后实测踩到：httpd 只绑 127.0.0.1，外网取不到订阅。
+    _BIND=$(ss -tln 2>/dev/null | awk -v p=":$SUBPORT\$" '$4 ~ p {print $4}' | head -1)
+    case "$_BIND" in
+    127.0.0.1:* | \[::1\]:*)
+        fail "订阅只绑定在回环地址（$_BIND）——公网客户端连不上，订阅链接等于废的"
+        warn "修法：把启动命令里的 127.0.0.1: 去掉（busybox httpd -p PORT 即绑 0.0.0.0），重跑 deploy_singbox.sh --force"
+        ;;
+    "") warn "未读到订阅端口的监听地址（可能未启动）" ;;
+    *) ok "订阅监听在 $_BIND（公网可达）"; PASS=$((PASS + 1)) ;;
+    esac
     if [ -n "$SERVER_IP" ]; then
         for fmt in clmi.yaml sbox.json jhsub.txt; do
             # token 可能为空（sb 未生成 token 时订阅路径是 /<file>），不能硬拼出 //

@@ -1,5 +1,56 @@
 # Changelog
 
+## 2026-11-16 — P0：订阅服务只绑 127.0.0.1，公网客户端根本取不到订阅
+
+**YDL 重启后实测**：部署日志印出 `http://2.58.84.221:49208/<token>/clmi.yaml`，
+但从中国的客户端连过去 **ConnectionRefused**。
+
+服务器上看：
+
+```
+LISTEN 0  9  127.0.0.1:49208  0.0.0.0:*  users:(("busybox",pid=823))
+```
+
+`lib/subscription.sh` 两处启动命令都写死了 `127.0.0.1:${port}`：
+
+- `@reboot` 的 cron 条目
+- 首次启动的 `nohup busybox httpd`
+
+于是订阅只在本机可达，而 `verify.sh` 只测 `127.0.0.1:$PORT` → **一路绿灯**。
+
+**为什么平时没暴露**：`sb.sh` 自己在配置订阅时也会拉一个 busybox httpd（绑 0.0.0.0）。
+`ensure_sub_httpd` 的判断是「端口已监听就跳过」，所以部署当时用的是 sb 那个；
+**重启后 sb 的进程没了，由我们的 `@reboot` cron 接管——于是变成只绑回环**。
+这个 bug 只在「部署后重启过」的机器上出现。
+
+### 修法
+
+```diff
+- busybox httpd -f -p 127.0.0.1:${port} -h /root/websbox
++ busybox httpd -f -p ${port}              -h /root/websbox
+```
+
+（`-p PORT` 不带地址 = 绑 0.0.0.0；订阅路径里的 token 才是访问控制手段。）
+
+`verify.sh` 同时新增一条**绑定地址检查**：
+
+```
+[x]   订阅只绑定在回环地址（127.0.0.1:49208）——公网客户端连不上，订阅链接等于废的
+```
+
+不再只问「本机能不能取到」，而是问「这个监听地址公网连得上吗」。
+
+### 实测（修完，从中国网络）
+
+```
+TCP 49208 可达
+clmi.yaml: HTTP 200, 5129 字节    ← port 字段: 52707/8080/52247/22114 都在
+sbox.json: HTTP 200, 9470 字节
+jhsub.txt: HTTP 200, 1625 字节
+```
+
+服务器侧 `LISTEN *:49208`，cron 也同步改成不带地址。
+
 ## 2026-11-16 — verify 的 G1 是假绿灯：`grep -q` + `pipefail` 把「密码登录开着」判成「已关」
 
 **YDL 重启后体检**，verify 报：

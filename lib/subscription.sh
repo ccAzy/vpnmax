@@ -138,7 +138,7 @@ ensure_sub_httpd() {
         # 回环绑定：订阅 HTTP 只听 127.0.0.1（busybox -p 支持 [IP:]PORT 写法），扫段拖链直接断
         {
             crontab -l 2>/dev/null | grep -vE 'busybox httpd.*(/root/websbox|subport.log)'
-            echo "@reboot sleep 10 && /bin/bash -c \"busybox httpd -f -p 127.0.0.1:${port} -h /root/websbox > /dev/null 2>&1 &\""
+            echo "@reboot sleep 10 && /bin/bash -c \"busybox httpd -f -p ${port} -h /root/websbox > /dev/null 2>&1 &\""
         } | crontab - 2>/dev/null || true
     else
         info "[dry-run] 写入 @reboot 订阅服务自启"
@@ -146,6 +146,9 @@ ensure_sub_httpd() {
     if ss -tln 2>/dev/null | grep -q ":$port"; then
         ok "订阅 HTTP 服务运行中 (端口 $port)"
     else
+        # 必须绑 0.0.0.0（`-p PORT` 不带地址）：订阅链接印的是公网 IP，
+        # 绑 127.0.0.1 就只有本机取得到——客户端根本连不上，而 verify 只测回环，
+        # 一路绿灯。2026-11-16 YDL 重启后实测：外网 ConnectionRefused。
         if $DRY_RUN; then
             info "[dry-run] 启动 busybox httpd (端口 $port)"
         else
@@ -157,7 +160,7 @@ ensure_sub_httpd() {
                 sleep 1
             }
             mkdir -p /root/websbox
-            nohup busybox httpd -f -p "127.0.0.1:${port}" -h /root/websbox >/dev/null 2>&1 &
+            nohup busybox httpd -f -p "${port}" -h /root/websbox >/dev/null 2>&1 &
             sleep 2
         fi
         if ss -tln 2>/dev/null | grep -q ":$port"; then

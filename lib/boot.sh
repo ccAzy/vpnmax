@@ -31,12 +31,12 @@ VPNMAX_VENDOR_FILES="sb.sh"
 # lib 版本戳：**每次改动 lib/ 就把它改掉**。服务器靠它判断要不要重拉已缓存的模块——
 # 旧逻辑只补缺失文件，缓存一旦落地就冻结，lib 的修复永远到不了线上（2026-09-23 连踩两次）。
 # 联动门禁见 tools/check-lib-integrity.py R7b（格式 + BOOT 自哈希 + 双哈希一致性）。
-VPNMAX_LIB_REV="2026-09-23.40"
+VPNMAX_LIB_REV="2026-09-23.41"
 
 # boot.sh 自哈希（归一化自哈希：把下一行的值置空后对本文件取 sha256）。
 # **每次改动 lib/boot.sh 都必须重算本常量**，否则 R7b 门禁失败拒绝安装。
 # 重算：sed 's/^BOOT_SHA256=".*"/BOOT_SHA256=""/' lib/boot.sh | sha256sum
-BOOT_SHA256="44399c1cc562a5d178419da0a8a8da5382d904b7daf48986dd3d18c32a427ef9"
+BOOT_SHA256="f7588640d8f7d53c72cc82ffa25b9d060aeb75c9a42476a66dd082721b6edf0d"
 
 # 远端源 allowlist（供应链 RCE 防线：VPNMAX_RAW 只能是自家源）。
 # vpnmax_fetch / 各入口自举下载前必经 vpnmax_raw_allowed()，命中失败即 fail-closed 中止。
