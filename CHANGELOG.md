@@ -1,5 +1,69 @@
 # Changelog
 
+## 2026-11-16 — verify 的 G1 是假绿灯：`grep -q` + `pipefail` 把「密码登录开着」判成「已关」
+
+**YDL 重启后体检**，verify 报：
+
+```
+[+]   G1: SSH 密码登录已关
+[+]   G1: root 仅密钥登录
+```
+
+但这台机器实际上 **root 密码登录是开着的**（我此刻就是用它给的密码连进去的）：
+
+```
+passwordauthentication yes
+permitrootlogin yes
+/root/.ssh/authorized_keys → 不存在
+```
+
+### 根因（两层，都属「查不到就算通过」）
+
+```bash
+set -euo pipefail
+if sshd -T -f /etc/ssh/sshd_config 2>/dev/null | grep -qi '^passwordauthentication yes'; then
+    warn ...      # 密码还开着
+else
+    ok "已关"      # ← 假绿灯
+fi
+```
+
+1. **`grep -q` 命中即退出 → 关掉管道 → `sshd` 还在写 → SIGPIPE → sshd 退出码非 0**
+   → `pipefail` 让整条管道返回非 0 → `if` 走 `else`。
+   实测对照：直接管道输出 `passwordauthentication yes`；同样命令放到
+   `bash -c 'set -euo pipefail; ...'` 里就是 **NOMATCH**。
+2. 即使 `sshd -T` **完全读不到**（命令不存在/权限问题），也走 `else` 报「已关」——
+   「无法判定」被当成了「已加固」。
+
+### 修法
+
+```bash
+_SSHD_DUMP=$(sshd -T -f /etc/ssh/sshd_config 2>/dev/null || true)
+if [ -z "$_SSHD_DUMP" ]; then
+    skip "G1: 读不到 sshd 生效配置，跳过（无法判定）"      # 读不到 ≠ 通过
+else
+    printf '%s
+' "$_SSHD_DUMP" | grep -qi '^passwordauthentication yes'  # 先收变量再 grep
+    ...
+fi
+```
+
+顺带把 `PermitRootLogin` 那条同样修掉（它也是同一个 `else` 逻辑）。
+
+### 实测
+
+| | 修前 | 修后 |
+| --- | --- | --- |
+| G1 密码登录 | `[+] 已关`（假的） | `[!] SSH 密码登录仍开着（应为 no）` |
+| G1 root 登录 | `[+] 仅密钥`（假的） | `[!] PermitRootLogin 仍是 yes` |
+| 通过数 | 41 | 40（两条从「通过」归位到「告警」） |
+
+### 教训
+
+这个坑和 `shell-script-quality` 里「七类坑」的第 2 条同源（`pipefail` + 消费者提前退出），
+只是这次藏在**安全检查**里：**验证脚本报「已加固」比报「未加固」危险得多**——
+它会让人放心地把一台裸奔的机器挂到公网上。
+
 ## 2026-11-16 — verify 域名分流的假红灯：只数 `.domain`，而 sb.sh 写的是 `domain_suffix`
 
 **YDL（Ubuntu 24.04，2.58.84.221）首次实机部署**发现：部署日志说

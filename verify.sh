@@ -49,8 +49,11 @@ FAIL=0
 # 原来的做法是少算几项就完事——总数从 39 掉到 37，汇总仍报「全部通过」，
 # 用户看不出「检查范围变小了」。这里显式计数并印出来。
 SKIP=0
-skip() { printf '%s[-]%s   %s
-' "$CYAN" "$N" "$*"; SKIP=$((SKIP + 1)); }
+skip() {
+    printf '%s[-]%s   %s
+' "$CYAN" "$N" "$*"
+    SKIP=$((SKIP + 1))
+}
 
 check() {
     local desc="$1"
@@ -90,7 +93,7 @@ check "sing-box 二进制" [ -n "$SB_BIN" ]
 # 硬编码版本号既会误杀可用版本，也挡不住「版本够新但配置真坏」。
 if [ -n "$SB_BIN" ] && [ -f /etc/s-box/sb.json ]; then
     _SB_VER=$("$SB_BIN" version 2>/dev/null | awk '/version/{print $NF; exit}' 2>/dev/null || true)
-    if _sb_out=$(ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS=true                  ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true                  "$SB_BIN" check -c /etc/s-box/sb.json 2>&1); then
+    if _sb_out=$(ENABLE_DEPRECATED_LEGACY_DOMAIN_STRATEGY_OPTIONS=true ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true "$SB_BIN" check -c /etc/s-box/sb.json 2>&1); then
         ok "sing-box ${_SB_VER:-?} 能解析当前配置（sing-box check 通过）"
         PASS=$((PASS + 1))
     else
@@ -214,17 +217,30 @@ echo "--- 调优缺口回归 ---"
 # G1：SSH 加固（判定时必须用运行中的 /usr/sbin/sshd，裸 sshd 可能是 /usr/local 自编译版）
 _SSHD_BIN="/usr/sbin/sshd"
 [ -x "$_SSHD_BIN" ] || _SSHD_BIN="sshd"
-if "$_SSHD_BIN" -T -f /etc/ssh/sshd_config 2>/dev/null | grep -qi '^passwordauthentication yes'; then
-    warn "G1: SSH 密码登录仍开着（应为 no）"
+# 必须先把输出收进变量，不能写成 `sshd -T | grep -q`：
+# 脚本是 set -o pipefail，而 grep -q 一旦命中就立刻退出、关掉管道 →
+# sshd 还在写 → SIGPIPE → sshd 退出码非 0 → pipefail 让整条管道失败 →
+# if 走 else 分支，把「密码登录开着」误判成「已关」。
+# 2026-11-16 YDL 实测：这台机器 root 密码登录是开着的，verify 却报「已关」。
+_SSHD_DUMP=$("$_SSHD_BIN" -T -f /etc/ssh/sshd_config 2>/dev/null || true)
+if [ -z "$_SSHD_DUMP" ]; then
+    # 读不到 ≠ 已加固。原来这里也走 else，等于「查不到就算通过」。
+    skip "G1: 读不到 sshd 生效配置，跳过 SSH 加固检查（无法判定）"
 else
-    ok "G1: SSH 密码登录已关"
-    PASS=$((PASS + 1))
-fi
-if "$_SSHD_BIN" -T -f /etc/ssh/sshd_config 2>/dev/null | grep -qi '^permitrootlogin yes'; then
-    warn "G1: PermitRootLogin 非 prohibit-password"
-else
-    ok "G1: root 仅密钥登录"
-    PASS=$((PASS + 1))
+    if printf '%s
+' "$_SSHD_DUMP" | grep -qi '^passwordauthentication yes'; then
+        warn "G1: SSH 密码登录仍开着（应为 no）"
+    else
+        ok "G1: SSH 密码登录已关"
+        PASS=$((PASS + 1))
+    fi
+    if printf '%s
+' "$_SSHD_DUMP" | grep -qi '^permitrootlogin yes'; then
+        warn "G1: PermitRootLogin 仍是 yes（应为 prohibit-password）"
+    else
+        ok "G1: root 仅密钥登录"
+        PASS=$((PASS + 1))
+    fi
 fi
 # G3：旧 ACVPN 残留
 _G3_LEFTOVER=""
@@ -356,11 +372,17 @@ else warn "防探测链不存在"; fi
 
 # 计数助手：lib/verify/*.sh 里的检查函数用它回报结果，
 # 否则 PASS/FAIL 会少算（原来靠内联副本自己 +1，删副本后要从这里补）
-check_pass() { ok "$*"; PASS=$((PASS + 1)); }
-check_fail() { fail "$*"; FAIL=$((FAIL + 1)); }
+check_pass() {
+    ok "$*"
+    PASS=$((PASS + 1))
+}
+check_fail() {
+    fail "$*"
+    FAIL=$((FAIL + 1))
+}
 
 # 3b. TUIC 端口可用性（P0：40254 为已知易被墙端口）
-verify_tuic   # 唯一实现在 lib/verify/tuic.sh；此处不再留内联副本
+verify_tuic # 唯一实现在 lib/verify/tuic.sh；此处不再留内联副本
 
 if [ "$VMESS_LOCK" = "on" ]; then
     if iptables-save 2>/dev/null | grep -q '! -i lo'; then
