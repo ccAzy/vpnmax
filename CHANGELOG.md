@@ -1,5 +1,56 @@
 # Changelog
 
+## 2026-11-16 — verify 域名分流的假红灯：只数 `.domain`，而 sb.sh 写的是 `domain_suffix`
+
+**YDL（Ubuntu 24.04，2.58.84.221）首次实机部署**发现：部署日志说
+`[+] 域名分流已配置，AI + 流媒体 + 搜索引擎走 WARP`，verify 却报
+`[!] 未检测到域名分流规则（WARP 进程在跑，但 sb.json 里没有 domain 规则——分流丢了）`。
+
+查实际配置，分流是好的：
+
+```json
+{"domain_suffix":["openai.com","chatgpt.com",...,"x.com"],"outbound":"socks-out"}
+```
+
+根因：`verify.sh` 的计数写的是
+
+```bash
+jq '[.route.rules[]? | select(.domain != null)] | length'
+```
+
+只认 `.domain`（一个字符串数组字段），而 `sb.sh` 实际写的是 **`domain_suffix`**，
+另外还可能有 `domain_keyword` / `domain_regex`。
+
+**这是「假红灯」**——比假绿灯更折腾人：它把人引去查一个并不存在的问题。
+在这台机器上它和上一轮新加的「WARP 在跑但规则没了」判据撞在一起，直接指向了错误结论。
+
+修法：
+
+```bash
+_DYSEL='(.domain // .domain_suffix // .domain_keyword // .domain_regex) != null'
+DOMAIN_COUNT=$(jq "[.route.rules[]? | select($_DYSEL)] | length" ...)
+# 再确认真的指向非 direct 出口（指向 direct 等于没分流）
+DOMAIN_ROUTED=$(jq "... | select((.outbound // "") != "" and (.outbound // "") != "direct")] | length" ...)
+```
+
+输出改为「域名规则 N 条，其中指向非 direct 出口 M 条」——两个数字一起看才知道是真分流。
+
+**验证**：同一份真实结构配置，旧逻辑数出 `0`，新逻辑数出 `2`（其中 1 条指向 socks-out）。
+
+### 顺带：YDL 这台机器的 vpnmax 为什么没跑成功
+
+根因不在脚本，在**系统 apt 源被改坏了**：
+
+```
+URIs: https:///ubuntu/          ← 三个斜杠、没有域名
+→ E: The repository 'https:/ubuntu noble-security Release' does not have a Release file
+→ apt-get update 失败 → bootstrap 装不上 iptables-persistent/chrony → 后续全断
+```
+
+改成 `https://security.ubuntu.com/ubuntu/` 后，`bootstrap.sh` 与 `deploy_singbox.sh`
+在 **Ubuntu 24.04 首次一次跑通**：五协议全起、订阅 200、`verify` 36 通过 / 0 失败，
+`[+] 全程无警告`。
+
 ## 2026-11-15 — 补上「CI 绿 ≠ 部署可用」的缺口：新增 smoke job
 
 原来 CI 只跑 bats + shellcheck + 门禁，**四个入口脚本一个都没真正执行过**。

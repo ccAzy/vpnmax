@@ -507,9 +507,15 @@ fi
 echo "--- 域名分流 ---"
 _DY_CONF="/etc/s-box/sb.json"
 if [ -f "$_DY_CONF" ] && command -v jq >/dev/null 2>&1; then
-    DOMAIN_COUNT=$(jq '[.route.rules[]? | select(.domain != null)] | length' "$_DY_CONF" 2>/dev/null || echo "?")
+    # 只数 `.domain` 是错的：sb.sh 实际写的是 `domain_suffix`（还有 domain_keyword/domain_regex）。
+    # 2026-11-16 YDL 实机实测：分流明明是好的（domain_suffix 19 个域名指向 socks-out），
+    # 这里却数出 0 条并报「分流丢了」——假红灯把人引去查一个不存在的问题。
+    _DYSEL='(.domain // .domain_suffix // .domain_keyword // .domain_regex) != null'
+    DOMAIN_COUNT=$(jq "[.route.rules[]? | select($_DYSEL)] | length" "$_DY_CONF" 2>/dev/null || echo "?")
+    # 再确认这些规则真的指向非 direct 出口（指向 direct 等于没分流）
+    DOMAIN_ROUTED=$(jq "[.route.rules[]? | select($_DYSEL) | select((.outbound // \"\") != \"\" and (.outbound // \"\") != \"direct\")] | length" "$_DY_CONF" 2>/dev/null || echo 0)
     if [ "$DOMAIN_COUNT" != "0" ] && [ "$DOMAIN_COUNT" != "?" ]; then
-        ok "域名分流已配置（sb.json 中含 domain 的 route 规则：${DOMAIN_COUNT} 条）"
+        ok "域名分流已配置（域名规则 ${DOMAIN_COUNT} 条，其中指向非 direct 出口 ${DOMAIN_ROUTED} 条）"
         PASS=$((PASS + 1))
     else
         # 真跑一次判据（与 lib/warp.sh:setup_domain_routing 同口径），
