@@ -1,5 +1,67 @@
 # Changelog
 
+## 2026-11-17 — HY2 连不上的根因：订阅里写死 `insecure=0`，而证书是自签且无 SAN
+
+**现象**：YDL 上 HY2 节点在客户端里连不上；TUIC 正常。
+
+**实测定位**（在服务器上用 sing-box 做客户端连本机）：
+
+```
+① hy2 insecure=false（订阅当时的写法）
+   HTTP 000
+   ERROR ... tls: failed to verify certificate:
+   x509: certificate relies on legacy Common Name field, use SANs instead
+
+② hy2 insecure=true
+   HTTP 204   ✓
+```
+
+证书是 `CN=www.bing.com` 的自签证书，`openssl x509 -text` 显示
+**`No extensions in certificate`**——一个扩展都没有，也就没有 SAN。
+现代 TLS 实现（Go / Chrome / 各家客户端）在要求校验证书时，
+看到「只有 CN、没有 SAN」会直接拒绝，连证书链都不用比。
+`pinSHA256` 并不能救：它只有 hysteria 官方客户端认，
+sing-box / mihomo / Karing 都不解析这个参数。
+
+**根因在 `vendor/sb.sh`**：作者算了一个 `ins_hy2` 变量
+（自签证书分支设为 1，真实证书分支设为 0），但链接里**没用它**：
+
+```bash
+# 1299 行（实际生效）——写死 0，注释掉的 1300 行才是用变量的版本
+hy2_link="...&insecure=0&allowInsecure=0$hyps&sni=$hy2_name&pinSHA256=$SHA256#..."
+#hy2_link="...&insecure=$ins_hy2&allowInsecure=$ins_hy2$hyps&sni=$hy2_name#..."
+```
+
+对照 TUIC 分支：它用的是 `$ins`（自签时为 1），所以 TUIC 一直是好的。
+**同一个证书，一个协议写了变量、一个写死常量——所以只有 HY2 挂。**
+
+### 修法
+
+`insecure=0&allowInsecure=0` → `insecure=$ins_hy2&allowInsecure=$ins_hy2`，
+并删掉那行已失效的注释副本。`pinSHA256` 保留（支持它的客户端多一层防护）。
+
+同步 `SB_SHA256` / `SB_ARGO_PATCHED_SHA256`，bump `VPNMAX_LIB_REV`。
+
+### 顺带验证：端口跳跃是好的
+
+一度怀疑跳跃段不通（订阅里带 `mport`），用 HK 当外部客户端实测：
+
+| 目标 | 结果 |
+| --- | --- |
+| tuic 主端口 22114 | HTTP 204 |
+| tuic 跳跃段 44000 | HTTP 204 |
+| hy2 主端口 52247（insecure=true） | HTTP 204 |
+| hy2 跳跃段 40500（insecure=true） | HTTP 204 |
+| hy2 主端口（insecure=false，原写法） | HTTP 000 |
+
+跳跃段和主端口一样通，DNAT 规则计数也在涨。**问题只在证书校验这一层。**
+
+### 一个排查陷阱（记下来）
+
+在服务器上连 `127.0.0.1:44000` 测跳跃段会得到 `connection refused`——
+**本地回环流量走 OUTPUT 链，不经过 PREROUTING，DNAT 根本不生效**。
+必须从外部主机测，否则会把「测试方法错」当成「功能坏了」。
+
 ## 2026-11-16 — P0：订阅服务只绑 127.0.0.1，公网客户端根本取不到订阅
 
 **YDL 重启后实测**：部署日志印出 `http://2.58.84.221:49208/<token>/clmi.yaml`，

@@ -474,7 +474,10 @@ if [ -f /etc/s-box/subport.log ] && [ -f /etc/s-box/subtoken.log ]; then
         warn "修法：把启动命令里的 127.0.0.1: 去掉（busybox httpd -p PORT 即绑 0.0.0.0），重跑 deploy_singbox.sh --force"
         ;;
     "") warn "未读到订阅端口的监听地址（可能未启动）" ;;
-    *) ok "订阅监听在 $_BIND（公网可达）"; PASS=$((PASS + 1)) ;;
+    *)
+        ok "订阅监听在 $_BIND（公网可达）"
+        PASS=$((PASS + 1))
+        ;;
     esac
     if [ -n "$SERVER_IP" ]; then
         for fmt in clmi.yaml sbox.json jhsub.txt; do

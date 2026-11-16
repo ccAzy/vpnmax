@@ -194,9 +194,12 @@ show_nodes() {
 # 下面链接却全是 IPv4」这种自相矛盾，用户会当成故障。
 sub_server_ip() {
     local v=""
-    v=$(grep -m1 -E '^[[:space:]]*server:[[:space:]]*' /etc/s-box/clmi.yaml 2>/dev/null \
-        | sed 's/^[[:space:]]*server:[[:space:]]*//' | tr -d '"[:space:]' || true)
-    if [ -n "$v" ]; then printf '%s\n' "$v"; return 0; fi
+    v=$(grep -m1 -E '^[[:space:]]*server:[[:space:]]*' /etc/s-box/clmi.yaml 2>/dev/null |
+        sed 's/^[[:space:]]*server:[[:space:]]*//' | tr -d '"[:space:]' || true)
+    if [ -n "$v" ]; then
+        printf '%s\n' "$v"
+        return 0
+    fi
     curl -fsSL --max-time 5 https://api.ipify.org 2>/dev/null ||
         curl -fsSL --max-time 5 https://icanhazip.com 2>/dev/null ||
         echo "你的服务器IP"
@@ -216,21 +219,22 @@ show_subscription() {
     fi
     public_ip=$(sub_server_ip 2>/dev/null || true)
     [ -n "$public_ip" ] || public_ip="你的服务器IP"
-        # 末尾就绪确认：链接印出去之前先真打一次，200 就说 200，
-        # 不是 200 就如实告警（此时已过完全部步骤，再不到就是真问题）。
-        local _code="000" _i
-        for _i in $(seq 1 5); do
-            # --noproxy：用户机器上常残留 http_proxy，连 127.0.0.1 也会被送去代理
-            # （实测本机自检返回 502），本机检查必须绕开代理
-            _code=$(curl -s --noproxy '*' -o /dev/null -w '%{http_code}' --max-time 3 \
-                "http://127.0.0.1:${sub_port}/${token}/clmi.yaml" 2>/dev/null || echo 000)
-            [ "$_code" = "200" ] && break
-            sleep 1
-        done
-        if [ "$_code" = "200" ]; then ok "订阅服务就绪（本机 HTTP 200）"
-        else warn "订阅端口 ${sub_port} 返回 HTTP ${_code}，客户端可能导入失败：检查 ss -tlnp | grep ${sub_port}"; fi
-        echo ""
-        info "━━━ 订阅链接 ━━━"
+    # 末尾就绪确认：链接印出去之前先真打一次，200 就说 200，
+    # 不是 200 就如实告警（此时已过完全部步骤，再不到就是真问题）。
+    local _code="000" _i
+    for _i in $(seq 1 5); do
+        # --noproxy：用户机器上常残留 http_proxy，连 127.0.0.1 也会被送去代理
+        # （实测本机自检返回 502），本机检查必须绕开代理
+        _code=$(curl -s --noproxy '*' -o /dev/null -w '%{http_code}' --max-time 3 \
+            "http://127.0.0.1:${sub_port}/${token}/clmi.yaml" 2>/dev/null || echo 000)
+        [ "$_code" = "200" ] && break
+        sleep 1
+    done
+    if [ "$_code" = "200" ]; then
+        ok "订阅服务就绪（本机 HTTP 200）"
+    else warn "订阅端口 ${sub_port} 返回 HTTP ${_code}，客户端可能导入失败：检查 ss -tlnp | grep ${sub_port}"; fi
+    echo ""
+    info "━━━ 订阅链接 ━━━"
     echo ""
     echo "Clash / Mihomo:"
     echo "http://${public_ip}:${sub_port}/${token}/clmi.yaml"

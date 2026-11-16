@@ -31,12 +31,12 @@ VPNMAX_VENDOR_FILES="sb.sh"
 # lib 版本戳：**每次改动 lib/ 就把它改掉**。服务器靠它判断要不要重拉已缓存的模块——
 # 旧逻辑只补缺失文件，缓存一旦落地就冻结，lib 的修复永远到不了线上（2026-09-23 连踩两次）。
 # 联动门禁见 tools/check-lib-integrity.py R7b（格式 + BOOT 自哈希 + 双哈希一致性）。
-VPNMAX_LIB_REV="2026-09-23.41"
+VPNMAX_LIB_REV="2026-09-23.42"
 
 # boot.sh 自哈希（归一化自哈希：把下一行的值置空后对本文件取 sha256）。
 # **每次改动 lib/boot.sh 都必须重算本常量**，否则 R7b 门禁失败拒绝安装。
 # 重算：sed 's/^BOOT_SHA256=".*"/BOOT_SHA256=""/' lib/boot.sh | sha256sum
-BOOT_SHA256="f7588640d8f7d53c72cc82ffa25b9d060aeb75c9a42476a66dd082721b6edf0d"
+BOOT_SHA256="d7a597867d8bdb4b87aef8e023901ad167518549896a99bae0cc3fe028b24f26"
 
 # 远端源 allowlist（供应链 RCE 防线：VPNMAX_RAW 只能是自家源）。
 # vpnmax_fetch / 各入口自举下载前必经 vpnmax_raw_allowed()，命中失败即 fail-closed 中止。
@@ -60,7 +60,7 @@ vpnmax_raw_allowed() {
     local raw="${VPNMAX_RAW:-}" allow
     for allow in $VPNMAX_RAW_ALLOW; do
         # 前缀匹配：锁死 host + 仓库路径（如 evil 换自家 raw 下的别的仓库也过不去）
-        case "$raw" in "https://$allow"*|"http://$allow"*) return 0 ;; esac
+        case "$raw" in "https://$allow"* | "http://$allow"*) return 0 ;; esac
     done
     printf '[x] VPNMAX_RAW 源不在白名单（%s），拒绝下载\n' "${VPNMAX_RAW:-}" >&2
     return 1
@@ -96,7 +96,11 @@ vpnmax_fetch() { # <远端相对路径> <落到本地路径> <max-time>
         _hb="${base#https://}"
         _ok=0
         for allow in $VPNMAX_RAW_ALLOW; do
-            case "$_hb" in "$allow"*) _ok=1; break ;; esac
+            case "$_hb" in "$allow"*)
+                _ok=1
+                break
+                ;;
+            esac
         done
         [ "$_ok" = 1 ] || continue
         tmp=$(mktemp "${out}.vpnmax.XXXXXX" 2>/dev/null) || return 1

@@ -95,10 +95,10 @@ SB_COMMIT="5001e76efc9e15eac1f8ff33a0b389172e331e1d"
 #   ② 版本策略：sing-box 跟随上游最新（可用 VPNMAX_SINGBOX_PIN 冻结）
 #      cloudflared 2026.8.3 / cfst v2.3.5 仍为固定 pin
 #   ③ bbr() 改本地最小实现（不再拉 teddysun/across，避免覆盖本项目的 TCP buffer 调优）
-SB_SHA256="e0bada0edac36653df9fb6f88c6631286fa77ebbedcce172443f7d6085ac623f"
+SB_SHA256="6dfe140bc44c57f050d341de586acbe072f30445f06208d398bc02b891d3fa94"
 # apply_argo_patch 只把 --protocol http2 改成 auto 后的精确哈希。
 # 只信任这两个当前版本哈希；旧 /etc/s-box/.sb-argo-patched.sha256 不再能“保活”历史 sb.sh。
-SB_ARGO_PATCHED_SHA256="8abdbaf9b6d2074f75d29372bb065cfcaac5dccf27da119448a3289021c860a9"
+SB_ARGO_PATCHED_SHA256="86921e8e6d5f3d9b41bdce5e4250ca885633187cb23c2b2bd1609db8c415913e"
 SB_URL="https://raw.githubusercontent.com/ccAzy/vpnmax/main/vendor/sb.sh"
 
 # ── 环境预检 + 第二阶段依赖兜底 ──
